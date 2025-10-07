@@ -35,7 +35,7 @@ This guide is intended to provide an end-to-end demonstration of an OpenShift `C
    helm repo update v1k0d3n
    ```
 
-2. Now you can view the versions of the Helm chart with the following command. Be aware of the `appVersion` tag and commit, which matches tags and commits within this GitHub repository (i.e. `v0.2.2-fee285c`).
+2. Now you can view the versions of the Helm chart with the following command. Be aware of the `appVersion` tag and commit, which matches tags and commits within this GitHub repository (i.e. `v0.2.3-f87ff92`).
 
    ```bash
    helm search repo v1k0d3n/kubevirt-redfish --versions
@@ -45,7 +45,7 @@ This guide is intended to provide an end-to-end demonstration of an OpenShift `C
    ```bash
    ❯ helm search repo v1k0d3n/kubevirt-redfish --versions
    NAME                    	CHART VERSION	APP VERSION   	DESCRIPTION
-   v1k0d3n/kubevirt-redfish	0.2.2        	v0.2.2-fee285c	Custom kubevirt-redfish chart with enhanced fea...
+   v1k0d3n/kubevirt-redfish	0.2.3        	v0.2.3-f87ff92	Custom kubevirt-redfish chart with enhanced fea...
    ```
 
 ## Step 1: Install Virtual Machines (via Helm)
@@ -90,7 +90,7 @@ This guide is intended to provide an end-to-end demonstration of an OpenShift `C
 2. Once you have *minimally* configure/edit the `custom-values-kubevirt-redfish.yaml` file for your environment, you can install the chart by using the following command.
 
    ```bash
-   helm upgrade --install kubevirt-redfish v1k0d3n/kubevirt-redfish --version 0.2.2 -f custom-values-kubevirt-redfish.yaml -n jinkit-kvm
+   helm upgrade --install kubevirt-redfish v1k0d3n/kubevirt-redfish --version 0.2.3 -f custom-values-kubevirt-redfish.yaml -n jinkit-kvm
    ```
 
 ## Step 3: Deploy OpenShift via ClusterInstance

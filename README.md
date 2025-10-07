@@ -74,32 +74,32 @@ The `kubevirt-redfish` project uses [Quay.io](https://quay.io/) to store both th
    ```bash
    ❯ helm search repo v1k0d3n
    NAME                         CHART VERSION   APP VERSION     DESCRIPTION
-   v1k0d3n/kubevirt-redfish     0.2.2           v0.2.2-fee285c  Custom kubevirt-redfish chart with enhanced fea...
+   v1k0d3n/kubevirt-redfish     0.2.3           v0.2.3-f87ff92  Custom kubevirt-redfish chart with enhanced fea...
    v1k0d3n/vms-on-ocpv          0.1.1           v0.1.1-ff18cb3  A Helm chart that deploys Virtual Machines on O...
    ```
 
 2. You can then review the example `values.yaml` included with the Helm chart by using the following command.
    ```bash
-   helm show values v1k0d3n/kubevirt-redfish --version 0.2.2
+   helm show values v1k0d3n/kubevirt-redfish --version 0.2.3
    ```
 
    NOTE: If you prefer to have a cleaned version of the `values.yaml` (i.e. without comments or line breaks) you can run the following.
    ```bash
-   helm show values v1k0d3n/kubevirt-redfish --version 0.2.2 | sed 's/\s*#.*$//' | grep -v '^\s*$'
+   helm show values v1k0d3n/kubevirt-redfish --version 0.2.3 | sed 's/\s*#.*$//' | grep -v '^\s*$'
    ```
 
 3. To save the `values.yaml` to your your local environment for direct editing, just redirect the output to a YAML file.
    ```bash
-   helm show values v1k0d3n/kubevirt-redfish --version 0.2.2 > my-values.yaml
+   helm show values v1k0d3n/kubevirt-redfish --version 0.2.3 > my-values.yaml
    ```
 
 4. You can also save the chart locally by issuing the following command.
    ```bash
    # Download the Chart locally:
-   helm pull v1k0d3n/kubevirt-redfish --version 0.2.2
+   helm pull v1k0d3n/kubevirt-redfish --version 0.2.3
    
    # Explode the tar file:
-   tar -xzf kubevirt-redfish-0.2.2.tgz
+   tar -xzf kubevirt-redfish-0.2.3.tgz
 
    # Make a copy of the sample values.yaml manifest:
    cp kubevirt-redfish/values.yaml my-values.yaml
@@ -107,7 +107,7 @@ The `kubevirt-redfish` project uses [Quay.io](https://quay.io/) to store both th
 
 5. Now you can install the Chart using your own custom values.yaml:
    ```bash
-   helm install kubevirt-redfish v1k0d3n/kubevirt-redfish --version 0.2.2 \
+   helm install kubevirt-redfish v1k0d3n/kubevirt-redfish --version 0.2.3 \
      --namespace kubevirt-redfish \
      --create-namespace \
      -f my-values.yaml
@@ -116,7 +116,7 @@ The `kubevirt-redfish` project uses [Quay.io](https://quay.io/) to store both th
 6. You can also ***optionally*** use inline edits during the `helm install` command.
    ```bash
    helm install kubevirt-redfish v1k0d3n/kubevirt-redfish \
-     --set image.tag=v0.2.2 \
+     --set image.tag=v0.2.3 \
      --set service.type=LoadBalancer \
      --namespace kubevirt-redfish \
      --create-namespace
