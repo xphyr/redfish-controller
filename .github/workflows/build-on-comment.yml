@@ -39,24 +39,45 @@ jobs:
         COMMENT="${{ github.event.comment.body }}"
         PR_NUMBER="${{ github.event.issue.number }}"
         
+        echo "=== Fetching PR details ==="
+        echo "PR Number: ${PR_NUMBER}"
+        echo "Repository: ${{ github.repository }}"
+        
         # Get the PR details to fetch the actual commit SHA
-        echo "Fetching PR details for PR #${PR_NUMBER}..."
+        echo "Calling GitHub API to get PR details..."
         PR_DATA=$(gh api repos/${{ github.repository }}/pulls/${PR_NUMBER})
+        
+        echo "API response received. Extracting commit SHA..."
         COMMIT_SHA=$(echo "$PR_DATA" | jq -r '.head.sha')
         
+        # Validate that we got a commit SHA
+        if [[ -z "$COMMIT_SHA" || "$COMMIT_SHA" == "null" ]]; then
+          echo "ERROR: Failed to get commit SHA from PR #${PR_NUMBER}"
+          echo "PR Data: $PR_DATA"
+          exit 1
+        fi
+        
+        echo "=== PR Details ==="
         echo "PR Number: ${PR_NUMBER}"
         echo "Commit SHA: ${COMMIT_SHA}"
+        echo "Comment: ${COMMENT}"
         
+        # Determine action
         if [[ "$COMMENT" == *"#ready-to-test"* ]]; then
+          ACTION="test"
           echo "action=test" >> $GITHUB_OUTPUT
         elif [[ "$COMMENT" == *"#ready-to-push"* ]]; then
+          ACTION="push"
           echo "action=push" >> $GITHUB_OUTPUT
         fi
         
         echo "pr-number=$PR_NUMBER" >> $GITHUB_OUTPUT
         echo "commit-sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
         
-        echo "Parsed comment: action=$ACTION, PR=$PR_NUMBER, commit=$COMMIT_SHA"
+        echo "=== Output Summary ==="
+        echo "Action: $ACTION"
+        echo "PR: $PR_NUMBER"
+        echo "Commit: $COMMIT_SHA"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
