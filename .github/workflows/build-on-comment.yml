@@ -33,12 +33,19 @@ jobs:
       commit-sha: ${{ steps.parse-comment.outputs.commit-sha }}
     
     steps:
-    - name: Parse comment
+    - name: Parse comment and get PR details
       id: parse-comment
       run: |
         COMMENT="${{ github.event.comment.body }}"
         PR_NUMBER="${{ github.event.issue.number }}"
-        COMMIT_SHA="${{ github.event.issue.pull_request.head.sha }}"
+        
+        # Get the PR details to fetch the actual commit SHA
+        echo "Fetching PR details for PR #${PR_NUMBER}..."
+        PR_DATA=$(gh api repos/${{ github.repository }}/pulls/${PR_NUMBER})
+        COMMIT_SHA=$(echo "$PR_DATA" | jq -r '.head.sha')
+        
+        echo "PR Number: ${PR_NUMBER}"
+        echo "Commit SHA: ${COMMIT_SHA}"
         
         if [[ "$COMMENT" == *"#ready-to-test"* ]]; then
           echo "action=test" >> $GITHUB_OUTPUT
@@ -50,6 +57,8 @@ jobs:
         echo "commit-sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
         
         echo "Parsed comment: action=$ACTION, PR=$PR_NUMBER, commit=$COMMIT_SHA"
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
     - name: Check maintainer permissions
       id: check
@@ -419,21 +428,17 @@ jobs:
         PR_NUMBER="${{ needs.check-permissions.outputs.pr-number }}"
         SOURCE_IMAGE="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:${COMMIT_SHA}"
         PR_IMAGE="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:pr-${PR_NUMBER}"
-        LATEST_IMAGE="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:latest"
         
         echo "Creating additional tags from: ${SOURCE_IMAGE}"
         
-        # Create PR tag
+        # Create PR tag (NOT latest - that's only for main branch merges)
         echo "Creating PR tag: ${PR_IMAGE}"
         docker buildx imagetools create "${SOURCE_IMAGE}" --tag "${PR_IMAGE}"
         
-        # Create latest tag
-        echo "Creating latest tag: ${LATEST_IMAGE}"
-        docker buildx imagetools create "${SOURCE_IMAGE}" --tag "${LATEST_IMAGE}"
-        
-        echo "Successfully created additional tags:"
+        echo "Successfully created additional tag:"
         echo "- ${PR_IMAGE}"
-        echo "- ${LATEST_IMAGE}"
+        echo ""
+        echo "Note: 'latest' tag is only created when merging to main branch"
 
   # Helm chart build and push (only for #ready-to-push)
   helm-chart-tag:
@@ -530,11 +535,12 @@ jobs:
           - ✅ Helm Chart Package
           
           **Container tags pushed:**
-          - \`${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.commit_sha }}\`
+          - \`${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ needs.check-permissions.outputs.commit-sha }}\`
           - \`${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:pr-${{ needs.check-permissions.outputs.pr-number }}\`
-          - \`${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:latest\`
           
-          **Registry:** ${{ env.REGISTRY }}/${{ env.NAMESPACE }}"
+          **Registry:** ${{ env.REGISTRY }}/${{ env.NAMESPACE }}
+          
+          _Note: The 'latest' tag is only created when merging to the main branch._"
         else
           gh pr comment ${{ needs.check-permissions.outputs.pr-number }} --body "❌ **Build and Push Failed**
           
