@@ -365,26 +365,42 @@ jobs:
         PR_NUMBER="${{ needs.check-permissions.outputs.pr-number }}"
         IMAGE_BASE="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}"
         
-        # Create tags for this specific commit
-        TAGS="${IMAGE_BASE}:${COMMIT_SHA}"
+        # Debug: Show what we're working with
+        echo "COMMIT_SHA: '${COMMIT_SHA}'"
+        echo "PR_NUMBER: '${PR_NUMBER}'"
+        echo "IMAGE_BASE: '${IMAGE_BASE}'"
+        
+        # Create tags for this specific commit (use short SHA like ci.yml does)
+        SHORT_SHA="${COMMIT_SHA:0:8}"
+        TAGS="${IMAGE_BASE}:${SHORT_SHA}"
         TAGS="${TAGS},${IMAGE_BASE}:pr-${PR_NUMBER}"
         TAGS="${TAGS},${IMAGE_BASE}:latest"
         
         echo "Generated tags: ${TAGS}"
         echo "tags=${TAGS}" >> $GITHUB_OUTPUT
-        echo "commit_sha=${COMMIT_SHA}" >> $GITHUB_OUTPUT
+        echo "commit_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+        
+    - name: Debug build context
+      run: |
+        echo "Build context contents:"
+        ls -la .
+        echo "Dockerfile exists:"
+        ls -la Dockerfile
+        echo "Dockerfile contents (first 10 lines):"
+        head -10 Dockerfile
           
     - name: Build and push container image
       uses: docker/build-push-action@v5
       with:
         context: .
+        file: ./Dockerfile
+        push: true
         tags: ${{ steps.tags.outputs.tags }}
         platforms: linux/amd64,linux/arm64
         cache-from: type=gha
         cache-to: type=gha,mode=max
         provenance: false
         sbom: false
-        outputs: type=registry
         
     - name: Debug - Show what was pushed
       run: |
@@ -488,7 +504,7 @@ jobs:
           - ✅ Helm Chart Package
           
           **Container tags pushed:**
-          - \`${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ needs.check-permissions.outputs.commit-sha }}\`
+          - \`${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.commit_sha }}\`
           - \`${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:pr-${{ needs.check-permissions.outputs.pr-number }}\`
           - \`${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:latest\`
           
