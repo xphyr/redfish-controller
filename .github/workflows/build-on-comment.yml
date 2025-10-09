@@ -370,11 +370,9 @@ jobs:
         echo "PR_NUMBER: '${PR_NUMBER}'"
         echo "IMAGE_BASE: '${IMAGE_BASE}'"
         
-        # Create tags for this specific commit (use short SHA like ci.yml does)
+        # Create tags like ci.yml does - only commit SHA initially
         SHORT_SHA="${COMMIT_SHA:0:8}"
         TAGS="${IMAGE_BASE}:${SHORT_SHA}"
-        TAGS="${TAGS},${IMAGE_BASE}:pr-${PR_NUMBER}"
-        TAGS="${TAGS},${IMAGE_BASE}:latest"
         
         echo "Generated tags: ${TAGS}"
         echo "tags=${TAGS}" >> $GITHUB_OUTPUT
@@ -401,6 +399,7 @@ jobs:
         cache-to: type=gha,mode=max
         provenance: false
         sbom: false
+        outputs: type=registry
         
     - name: Debug - Show what was pushed
       run: |
@@ -408,6 +407,33 @@ jobs:
         echo "${{ steps.tags.outputs.tags }}"
         echo "Commit SHA: ${{ steps.tags.outputs.commit_sha }}"
         echo "Registry: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}"
+        
+    - name: Tag and push additional tags
+      run: |
+        echo "Information from build job:"
+        echo "Commit SHA: ${{ steps.tags.outputs.commit_sha }}"
+        echo "Built tags: ${{ steps.tags.outputs.tags }}"
+        
+        # Use the commit SHA tag from the successful build
+        COMMIT_SHA="${{ steps.tags.outputs.commit_sha }}"
+        PR_NUMBER="${{ needs.check-permissions.outputs.pr-number }}"
+        SOURCE_IMAGE="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:${COMMIT_SHA}"
+        PR_IMAGE="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:pr-${PR_NUMBER}"
+        LATEST_IMAGE="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:latest"
+        
+        echo "Creating additional tags from: ${SOURCE_IMAGE}"
+        
+        # Create PR tag
+        echo "Creating PR tag: ${PR_IMAGE}"
+        docker buildx imagetools create "${SOURCE_IMAGE}" --tag "${PR_IMAGE}"
+        
+        # Create latest tag
+        echo "Creating latest tag: ${LATEST_IMAGE}"
+        docker buildx imagetools create "${SOURCE_IMAGE}" --tag "${LATEST_IMAGE}"
+        
+        echo "Successfully created additional tags:"
+        echo "- ${PR_IMAGE}"
+        echo "- ${LATEST_IMAGE}"
 
   # Helm chart build and push (only for #ready-to-push)
   helm-chart-tag:
