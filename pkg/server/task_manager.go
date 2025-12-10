@@ -325,48 +325,6 @@ func (w *Worker) processVirtualMediaInsert(job *Job) error {
 		logger.Error("Failed to update task progress for job %s: %v", job.ID, err)
 	}
 
-	// AUTOMATION: Set boot order to prioritize CD-ROM after successful insertion
-	logger.Debug("DEBUG: Worker %d setting boot order to prioritize CD-ROM for VM %s/%s", w.ID, namespace, vmName)
-	if err := w.taskMgr.UpdateTaskProgress(job.TaskID, "Setting boot order to prioritize CD-ROM"); err != nil {
-		logger.Error("Failed to update task progress for job %s: %v", job.ID, err)
-	}
-
-	err = w.taskMgr.kubevirtClient.SetBootOrder(namespace, vmName, "Cd")
-	if err != nil {
-		logger.Error("Failed to set boot order for VM %s/%s: %v", namespace, vmName, err)
-		// Don't fail the entire operation if boot order setting fails
-		logger.Debug("DEBUG: Worker %d boot order setting failed for VM %s/%s: %v (continuing anyway)", w.ID, namespace, vmName, err)
-		if taskErr := w.taskMgr.UpdateTaskProgress(job.TaskID, "Warning: Boot order setting failed, but virtual media insertion succeeded"); taskErr != nil {
-			logger.Error("Failed to update task progress for job %s: %v", job.ID, taskErr)
-		}
-	} else {
-		logger.Debug("DEBUG: Worker %d boot order set successfully for VM %s/%s", w.ID, namespace, vmName)
-		if taskErr := w.taskMgr.UpdateTaskProgress(job.TaskID, "Boot order set to prioritize CD-ROM"); taskErr != nil {
-			logger.Error("Failed to update task progress for job %s: %v", job.ID, taskErr)
-		}
-	}
-
-	// AUTOMATION: Restart the VM to boot from the new ISO
-	logger.Debug("DEBUG: Worker %d restarting VM %s/%s to boot from new ISO", w.ID, namespace, vmName)
-	if err := w.taskMgr.UpdateTaskProgress(job.TaskID, "Restarting VM to boot from new ISO"); err != nil {
-		logger.Error("Failed to update task progress for job %s: %v", job.ID, err)
-	}
-
-	err = w.taskMgr.kubevirtClient.SetVMPowerState(namespace, vmName, "ForceRestart")
-	if err != nil {
-		logger.Error("Failed to restart VM %s/%s: %v", namespace, vmName, err)
-		// Don't fail the entire operation if restart fails
-		logger.Debug("DEBUG: Worker %d VM restart failed for VM %s/%s: %v (continuing anyway)", w.ID, namespace, vmName, err)
-		if taskErr := w.taskMgr.UpdateTaskProgress(job.TaskID, "Warning: VM restart failed, but virtual media insertion succeeded"); taskErr != nil {
-			logger.Error("Failed to update task progress for job %s: %v", job.ID, taskErr)
-		}
-	} else {
-		logger.Debug("DEBUG: Worker %d VM restart initiated successfully for VM %s/%s", w.ID, namespace, vmName)
-		if taskErr := w.taskMgr.UpdateTaskProgress(job.TaskID, "VM restart initiated successfully"); taskErr != nil {
-			logger.Error("Failed to update task progress for job %s: %v", job.ID, taskErr)
-		}
-	}
-
 	return nil
 }
 
