@@ -2534,7 +2534,7 @@ func (c *Client) EjectVirtualMedia(namespace, name, mediaID string) error {
 	pvcName := actualPVCName
 	if pvcName == "" {
 		pvcName = fmt.Sprintf("%s-bootiso", name)
-		logger.Warning("Could not determine actual PVC name from VM spec, using fallback name %s", pvcName)
+		logger.Warning("Could not determine actual PVC name from VM spec, using fallback name %s - cleanup may be incomplete; check for orphaned PVCs with pattern '%s-bootiso-*'", pvcName, name)
 	}
 
 	volumeImportSourceName := actualVolumeImportSourceName
