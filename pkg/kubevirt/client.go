@@ -2562,6 +2562,8 @@ func (c *Client) EjectVirtualMedia(namespace, name, mediaID string) error {
 	}
 
 	// Delete VolumeImportSource
+	// Note: VolumeImportSource only exists when CDI import was used (HTTP, or HTTPS with valid certificate).
+	// If helper pod was used (HTTPS with allowInsecureTLS=true), no VolumeImportSource was created.
 	gvrVIS := schema.GroupVersionResource{
 		Group:    "cdi.kubevirt.io",
 		Version:  "v1beta1",
@@ -2571,7 +2573,7 @@ func (c *Client) EjectVirtualMedia(namespace, name, mediaID string) error {
 	logger.Info("Deleting VolumeImportSource %s for ejected virtual media", volumeImportSourceName)
 	err = c.dynamicClient.Resource(gvrVIS).Namespace(namespace).Delete(ctx, volumeImportSourceName, metav1.DeleteOptions{})
 	if err != nil {
-		logger.Warning("Failed to delete VolumeImportSource %s: %v", volumeImportSourceName, err)
+		logger.Warning("Failed to delete VolumeImportSource %s: %v (this is expected if ISO was imported via helper pod instead of CDI)", volumeImportSourceName, err)
 		// Don't fail the operation if VolumeImportSource cleanup fails
 	} else {
 		logger.Info("Successfully deleted VolumeImportSource %s", volumeImportSourceName)
