@@ -2424,7 +2424,6 @@ func (c *Client) EjectVirtualMedia(namespace, name, mediaID string) error {
 	// Get the actual PVC name from the volume BEFORE removing it from the VM
 	// This is necessary because PVC names have unique identifiers appended
 	var actualPVCName string
-	var actualVolumeImportSourceName string
 	volumes, found, err := unstructured.NestedSlice(vm.Object, "spec", "template", "spec", "volumes")
 	if err == nil && found {
 		for _, volume := range volumes {
@@ -2434,9 +2433,7 @@ func (c *Client) EjectVirtualMedia(namespace, name, mediaID string) error {
 					if pvc, found := volumeMap["persistentVolumeClaim"].(map[string]interface{}); found {
 						if claimName, found := pvc["claimName"].(string); found {
 							actualPVCName = claimName
-							// Generate VolumeImportSource name based on actual PVC name
-							actualVolumeImportSourceName = sanitizeResourceName(fmt.Sprintf("%s-populator", actualPVCName))
-							logger.Info("Found actual PVC name %s and VolumeImportSource name %s for media %s", actualPVCName, actualVolumeImportSourceName, mediaID)
+							logger.Info("Found actual PVC name %s for media %s", actualPVCName, mediaID)
 							break
 						}
 					}
@@ -2537,11 +2534,8 @@ func (c *Client) EjectVirtualMedia(namespace, name, mediaID string) error {
 		logger.Warning("Could not determine actual PVC name from VM spec, using fallback name %s - cleanup may be incomplete; check for orphaned PVCs with pattern '%s-bootiso-*'", pvcName, name)
 	}
 
-	volumeImportSourceName := actualVolumeImportSourceName
-	if volumeImportSourceName == "" {
-		volumeImportSourceName = sanitizeResourceName(fmt.Sprintf("%s-populator", pvcName))
-		logger.Warning("Could not determine actual VolumeImportSource name, using fallback name %s", volumeImportSourceName)
-	}
+	// Generate VolumeImportSource name based on PVC name using the -populator suffix convention
+	volumeImportSourceName := sanitizeResourceName(fmt.Sprintf("%s-populator", pvcName))
 
 	// Log PVC state before deletion
 	pvc, err := c.kubernetesClient.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, pvcName, metav1.GetOptions{})
