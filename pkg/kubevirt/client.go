@@ -2421,6 +2421,27 @@ func (c *Client) EjectVirtualMedia(namespace, name, mediaID string) error {
 
 	logger.Debug("Current VM spec before ejection: %v", vm.Object)
 
+	// Get the actual PVC name from the volume BEFORE removing it from the VM
+	// This is necessary because PVC names have unique identifiers appended
+	var actualPVCName string
+	volumes, found, err := unstructured.NestedSlice(vm.Object, "spec", "template", "spec", "volumes")
+	if err == nil && found {
+		for _, volume := range volumes {
+			if volumeMap, ok := volume.(map[string]interface{}); ok {
+				if volumeName, found := volumeMap["name"].(string); found && volumeName == mediaID {
+					// Get PVC name from persistentVolumeClaim.claimName
+					if pvc, found := volumeMap["persistentVolumeClaim"].(map[string]interface{}); found {
+						if claimName, found := pvc["claimName"].(string); found {
+							actualPVCName = claimName
+							logger.Info("Found actual PVC name %s for media %s", actualPVCName, mediaID)
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Update VM to remove CD-ROM disk and volume reference
 	vmCopy := vm.DeepCopy()
 
@@ -2454,14 +2475,14 @@ func (c *Client) EjectVirtualMedia(namespace, name, mediaID string) error {
 	devices["disks"] = disks
 
 	// Get current volumes and remove the volume reference
-	var volumes []interface{}
+	var volumesToKeep []interface{}
 	var foundVolume bool
 	if existingVolumes, found, err := unstructured.NestedSlice(vmCopy.Object, "spec", "template", "spec", "volumes"); err == nil && found {
 		for _, volume := range existingVolumes {
 			if volumeMap, ok := volume.(map[string]interface{}); ok {
 				if volumeName, found := volumeMap["name"].(string); found {
 					if volumeName != mediaID {
-						volumes = append(volumes, volume)
+						volumesToKeep = append(volumesToKeep, volume)
 					} else {
 						logger.Info("Removing volume reference %s from VM spec", mediaID)
 						foundVolume = true
@@ -2475,7 +2496,7 @@ func (c *Client) EjectVirtualMedia(namespace, name, mediaID string) error {
 	}
 
 	// Update volumes in VM
-	err = unstructured.SetNestedSlice(vmCopy.Object, volumes, "spec", "template", "spec", "volumes")
+	err = unstructured.SetNestedSlice(vmCopy.Object, volumesToKeep, "spec", "template", "spec", "volumes")
 	if err != nil {
 		logger.Error("Failed to update VM volumes for %s/%s: %v", namespace, name, err)
 		return fmt.Errorf("failed to update VM volumes: %w", err)
@@ -2505,9 +2526,16 @@ func (c *Client) EjectVirtualMedia(namespace, name, mediaID string) error {
 
 	logger.Info("Successfully updated VM %s/%s to remove CD-ROM and volume for media %s", namespace, name, mediaID)
 
-	// Clean up associated PVC and VolumeImportSource
-	pvcName := fmt.Sprintf("%s-bootiso", name)
-	volumeImportSourceName := fmt.Sprintf("%s-populator", pvcName)
+	// Clean up associated PVC and VolumeImportSource using the actual names
+	// If we couldn't find the actual PVC name, try the fallback name
+	pvcName := actualPVCName
+	if pvcName == "" {
+		pvcName = fmt.Sprintf("%s-bootiso", name)
+		logger.Warning("Could not determine actual PVC name from VM spec, using fallback name %s - cleanup may be incomplete; check for orphaned PVCs with pattern '%s-bootiso-*'", pvcName, name)
+	}
+
+	// Generate VolumeImportSource name based on PVC name using the -populator suffix convention
+	volumeImportSourceName := sanitizeResourceName(fmt.Sprintf("%s-populator", pvcName))
 
 	// Log PVC state before deletion
 	pvc, err := c.kubernetesClient.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, pvcName, metav1.GetOptions{})
@@ -2528,6 +2556,8 @@ func (c *Client) EjectVirtualMedia(namespace, name, mediaID string) error {
 	}
 
 	// Delete VolumeImportSource
+	// Note: VolumeImportSource only exists when CDI import was used (HTTP, or HTTPS with valid certificate).
+	// If helper pod was used (HTTPS with allowInsecureTLS=true), no VolumeImportSource was created.
 	gvrVIS := schema.GroupVersionResource{
 		Group:    "cdi.kubevirt.io",
 		Version:  "v1beta1",
@@ -2537,7 +2567,7 @@ func (c *Client) EjectVirtualMedia(namespace, name, mediaID string) error {
 	logger.Info("Deleting VolumeImportSource %s for ejected virtual media", volumeImportSourceName)
 	err = c.dynamicClient.Resource(gvrVIS).Namespace(namespace).Delete(ctx, volumeImportSourceName, metav1.DeleteOptions{})
 	if err != nil {
-		logger.Warning("Failed to delete VolumeImportSource %s: %v", volumeImportSourceName, err)
+		logger.Warning("Failed to delete VolumeImportSource %s: %v (this is expected if ISO was imported via helper pod instead of CDI)", volumeImportSourceName, err)
 		// Don't fail the operation if VolumeImportSource cleanup fails
 	} else {
 		logger.Info("Successfully deleted VolumeImportSource %s", volumeImportSourceName)
