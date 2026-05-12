@@ -23,16 +23,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/v1k0d3n/kubevirt-redfish/pkg/logger"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/rest"
+	"k8s.io/client-go/kubernetes/fake"
+	kubevirtv1 "kubevirt.io/api/core/v1"
+	cdiv1beta1 "kubevirt.io/containerized-data-importer-api/pkg/apis/core/v1beta1"
 )
 
 // Mock config that implements the required interfaces
@@ -221,34 +226,6 @@ func TestIsRetryableError(t *testing.T) {
 	}
 }
 
-func TestVMSelectorConfig_JSON(t *testing.T) {
-	selector := &VMSelectorConfig{
-		Labels: map[string]string{
-			"app": "test",
-			"env": "prod",
-		},
-		Names: []string{"vm1", "vm2"},
-	}
-
-	// Test that the struct can be marshaled to JSON
-	// This is a basic test to ensure the struct is properly defined
-	if selector.Labels["app"] != "test" {
-		t.Error("Label 'app' should be 'test'")
-	}
-	if selector.Labels["env"] != "prod" {
-		t.Error("Label 'env' should be 'prod'")
-	}
-	if len(selector.Names) != 2 {
-		t.Error("Should have 2 names")
-	}
-	if selector.Names[0] != "vm1" {
-		t.Error("First name should be 'vm1'")
-	}
-	if selector.Names[1] != "vm2" {
-		t.Error("Second name should be 'vm2'")
-	}
-}
-
 func TestClient_retryWithBackoff(t *testing.T) {
 	client := &Client{
 		timeout: 30 * time.Second,
@@ -342,53 +319,6 @@ func TestClient_GetKubeVirtConfig(t *testing.T) {
 	}
 }
 
-func TestClient_GetDataVolumeConfig_Defaults(t *testing.T) {
-	client := &Client{
-		timeout:   30 * time.Second,
-		appConfig: nil, // No config provided
-	}
-
-	storageSize, allowInsecureTLS, storageClass, vmUpdateTimeout, isoDownloadTimeout, helperImage := client.getDataVolumeConfig()
-
-	// Should return default values
-	if storageSize != "10Gi" {
-		t.Errorf("Expected storage size '10Gi', got '%s'", storageSize)
-	}
-	if storageClass != "" {
-		t.Errorf("Expected empty storage class, got '%s'", storageClass)
-	}
-	if vmUpdateTimeout != "30s" {
-		t.Errorf("Expected vm update timeout '30s', got '%s'", vmUpdateTimeout)
-	}
-	if isoDownloadTimeout != "30m" {
-		t.Errorf("Expected iso download timeout '30m', got '%s'", isoDownloadTimeout)
-	}
-	// allowInsecureTLS can be false by default, but we should still check it's defined
-	_ = allowInsecureTLS // Use the variable to avoid linter warning
-	if helperImage != "alpine:latest" {
-		t.Errorf("Expected helper image 'alpine:latest', got '%s'", helperImage)
-	}
-}
-
-func TestClient_GetKubeVirtConfig_Defaults(t *testing.T) {
-	client := &Client{
-		timeout:   30 * time.Second,
-		appConfig: nil, // No config provided
-	}
-
-	apiVersion, timeout, allowInsecureTLS := client.getKubeVirtConfig()
-
-	// Should return default values
-	if apiVersion == "" {
-		t.Error("API version should have a default value")
-	}
-	if timeout == 0 {
-		t.Error("Timeout should have a default value")
-	}
-	// allowInsecureTLS can be false by default, but we should still check it's defined
-	_ = allowInsecureTLS // Use the variable to avoid linter warning
-}
-
 func TestStringPtr(t *testing.T) {
 	testString := "test-value"
 	ptr := stringPtr(testString)
@@ -426,431 +356,252 @@ func TestResourceMustParse(t *testing.T) {
 // NEW TESTS FOR 0% COVERAGE FUNCTIONS
 // =============================================================================
 
-func TestClient_TestConnection(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		kubernetesClient: nil, // Will cause panic
-	}
-
-	// Test connection failure - this will panic, so we need to recover
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected panic when kubernetes client is nil")
-		}
-	}()
-
-	//nolint:errcheck // We expect this to panic, not return an error
-	client.TestConnection()
-	t.Error("Expected panic, but function completed normally")
-}
-
-func TestClient_GetNamespaceInfo(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		kubernetesClient: nil, // Will cause panic
-	}
-
-	// Test namespace info retrieval failure - this will panic, so we need to recover
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected panic when kubernetes client is nil")
-		}
-	}()
-
-	//nolint:errcheck // We expect this to panic, not return an error
-	client.GetNamespaceInfo("test-namespace")
-	t.Error("Expected panic, but function completed normally")
-}
-
-func TestClient_GetVMMemory(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		dynamicClient: nil, // Will cause error in GetVM
-	}
-
-	// Test memory retrieval failure - should return default value, not error
-	memory, err := client.GetVMMemory("test-namespace", "test-vm")
-	if err != nil {
-		t.Errorf("Expected no error, got: %v", err)
-	}
-	if memory != 2.0 {
-		t.Errorf("Expected default memory 2.0, got: %f", memory)
-	}
-}
-
-func TestClient_GetVMCPU(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		dynamicClient: nil, // Will cause error in GetVM
-	}
-
-	// Test CPU retrieval failure - should return default value, not error
-	cpu, err := client.GetVMCPU("test-namespace", "test-vm")
-	if err != nil {
-		t.Errorf("Expected no error, got: %v", err)
-	}
-	if cpu != 1 {
-		t.Errorf("Expected default CPU 1, got: %d", cpu)
-	}
-}
-
-func TestClient_GetUploadProxyURL(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		kubernetesClient: nil, // Will cause error
-	}
-
-	// Test upload proxy URL retrieval failure - should return error, not panic
-	url, err := client.getUploadProxyURL()
-	if err == nil {
-		t.Error("Expected error when kubernetes client is nil")
-	}
-	if url != "" {
-		t.Error("Expected empty URL when kubernetes client is nil")
-	}
-}
-
-func TestClient_IsDataVolumeReady(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		dynamicClient: nil, // Will cause error
-	}
-
-	// Test data volume ready check failure - should return error, not panic
-	ready, err := client.IsDataVolumeReady("test-namespace", "test-dv")
-	if err == nil {
-		t.Error("Expected error when dynamic client is nil")
-	}
-	if ready {
-		t.Error("Expected false when dynamic client is nil")
-	}
-}
-
-func TestClient_CleanupExistingDataVolume(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		dynamicClient: nil, // Will cause error
-	}
-
-	// Test cleanup failure - should return error, not panic
-	err := client.cleanupExistingDataVolume("test-namespace", "test-dv")
-	if err == nil {
-		t.Error("Expected error when dynamic client is nil")
-	}
-}
-
-func TestClient_GetVMNetworkDetails(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		dynamicClient: nil, // Will cause error
-	}
-
-	// Test network details retrieval failure - should return error, not panic
-	networks, err := client.GetVMNetworkDetails("test-namespace", "test-vm")
-	if err == nil {
-		t.Error("Expected error when dynamic client is nil")
-	}
-	if networks != nil {
-		t.Error("Expected nil networks when dynamic client is nil")
-	}
-}
-
-func TestClient_GetVMStorageDetails(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		dynamicClient: nil, // Will cause error in GetVM
-	}
-
-	// Test storage details retrieval failure - should return error, not panic
-	storage, err := client.GetVMStorageDetails("test-namespace", "test-vm")
-	if err == nil {
-		t.Error("Expected error when dynamic client is nil")
-	}
-	if storage != nil {
-		t.Error("Expected nil storage when dynamic client is nil")
-	}
-}
-
-func TestClient_GetVMNetworkInterfaces(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		dynamicClient: nil, // Will cause error in GetVM
-	}
-
-	// Test network interfaces retrieval failure - should return error, not panic
-	interfaces, err := client.GetVMNetworkInterfaces("test-namespace", "test-vm")
-	if err == nil {
-		t.Error("Expected error when dynamic client is nil")
-	}
-	if interfaces != nil {
-		t.Error("Expected nil interfaces when dynamic client is nil")
-	}
-}
-
-func TestClient_GetVMStorage(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		dynamicClient: nil, // Will cause error in GetVM
-	}
-
-	// Test storage retrieval failure - should return error, not panic
-	storage, err := client.GetVMStorage("test-namespace", "test-vm")
-	if err == nil {
-		t.Error("Expected error when dynamic client is nil")
-	}
-	if storage != nil {
-		t.Error("Expected nil storage when dynamic client is nil")
-	}
-}
-
-func TestClient_GetVMBootOptions(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		dynamicClient: nil, // Will cause error in GetVM
-	}
-
-	// Test boot options retrieval failure - should return error, not panic
-	options, err := client.GetVMBootOptions("test-namespace", "test-vm")
-	if err == nil {
-		t.Error("Expected error when dynamic client is nil")
-	}
-	if options != nil {
-		t.Error("Expected nil options when dynamic client is nil")
-	}
-}
-
-func TestClient_SetVMBootOptions(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		dynamicClient: nil, // Will cause error in GetVM
-	}
-
-	options := map[string]interface{}{
-		"bootOrder": []string{"cdrom", "disk"},
-	}
-
-	// Test boot options setting failure - should return error, not panic
-	err := client.SetVMBootOptions("test-namespace", "test-vm", options)
-	if err == nil {
-		t.Error("Expected error when dynamic client is nil")
-	}
-}
-
-func TestClient_GetVMVirtualMedia(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		dynamicClient: nil, // Will cause error in GetVM
-	}
-
-	// Test virtual media retrieval failure - should return error, not panic
-	media, err := client.GetVMVirtualMedia("test-namespace", "test-vm")
-	if err == nil {
-		t.Error("Expected error when dynamic client is nil")
-	}
-	if media != nil {
-		t.Error("Expected nil media when dynamic client is nil")
-	}
-}
-
-func TestClient_IsVirtualMediaInserted(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		dynamicClient: nil, // Will cause error in GetVM
-	}
-
-	// Test virtual media check failure - should return error, not panic
-	inserted, err := client.IsVirtualMediaInserted("test-namespace", "test-vm", "cdrom0")
-	if err == nil {
-		t.Error("Expected error when dynamic client is nil")
-	}
-	if inserted {
-		t.Error("Expected false when dynamic client is nil")
-	}
-}
-
 func TestClient_IsVirtualMediaInserted_VolumeNameFix(t *testing.T) {
-	// This test validates that the volumeName fix works correctly
-	// by testing the core logic without requiring full Kubernetes client mocks
+	// This test validates that IsVirtualMediaInserted works correctly with typed API
 
-	t.Run("volumeName_logic_validation", func(t *testing.T) {
-		// Test the core volumeName logic by creating a VM spec and testing the volume lookup
-
-		// Case 1: volumeName matches disk name (legacy behavior)
-		vmSpec1 := map[string]interface{}{
-			"spec": map[string]interface{}{
-				"template": map[string]interface{}{
-					"spec": map[string]interface{}{
-						"domain": map[string]interface{}{
-							"devices": map[string]interface{}{
-								"disks": []interface{}{
-									map[string]interface{}{
-										"name":       "cdrom0",
-										"volumeName": "cdrom0", // Same as disk name
-										"cdrom": map[string]interface{}{
-											"bus": "sata",
+	testCases := []struct {
+		name           string
+		setupVM        func(mockClient *MockDynamicClient)
+		setupPVC       func(fakeK8sClient *fake.Clientset)
+		mediaID        string
+		expectedResult bool
+	}{
+		{
+			name: "CD-ROM with bound PVC returns true",
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Domain: kubevirtv1.DomainSpec{
+									Devices: kubevirtv1.Devices{
+										Disks: []kubevirtv1.Disk{
+											{
+												Name: "cdrom0",
+												DiskDevice: kubevirtv1.DiskDevice{
+													CDRom: &kubevirtv1.CDRomTarget{
+														Bus: kubevirtv1.DiskBusSATA,
+													},
+												},
+											},
+										},
+									},
+								},
+								Volumes: []kubevirtv1.Volume{
+									{
+										Name: "cdrom0",
+										VolumeSource: kubevirtv1.VolumeSource{
+											PersistentVolumeClaim: &kubevirtv1.PersistentVolumeClaimVolumeSource{
+												PersistentVolumeClaimVolumeSource: corev1.PersistentVolumeClaimVolumeSource{
+													ClaimName: "test-vm-bootiso",
+												},
+											},
 										},
 									},
 								},
 							},
 						},
-						"volumes": []interface{}{
-							map[string]interface{}{
-								"name": "cdrom0",
-								"persistentVolumeClaim": map[string]interface{}{
-									"claimName": "test-vm-bootiso",
-								},
-							},
+					},
+				}
+				mockClient.AddVM(vm)
+			},
+			setupPVC: func(fakeK8sClient *fake.Clientset) {
+				pvc := &corev1.PersistentVolumeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm-bootiso",
+						Namespace: "test-namespace",
+					},
+					Status: corev1.PersistentVolumeClaimStatus{
+						Phase: corev1.ClaimBound,
+						Capacity: corev1.ResourceList{
+							"storage": resource.MustParse("1Gi"),
 						},
 					},
-				},
+				}
+				fakeK8sClient.CoreV1().PersistentVolumeClaims("test-namespace").Create(
+					context.Background(), pvc, metav1.CreateOptions{})
 			},
-		}
-
-		// Case 2: volumeName differs from disk name (new fix behavior)
-		vmSpec2 := map[string]interface{}{
-			"spec": map[string]interface{}{
-				"template": map[string]interface{}{
-					"spec": map[string]interface{}{
-						"domain": map[string]interface{}{
-							"devices": map[string]interface{}{
-								"disks": []interface{}{
-									map[string]interface{}{
-										"name":       "cdrom0",
-										"volumeName": "cdrom0-volume", // Different from disk name
-										"cdrom": map[string]interface{}{
-											"bus": "sata",
+			mediaID:        "cdrom0",
+			expectedResult: true,
+		},
+		{
+			name: "CD-ROM with unbound PVC returns false",
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Domain: kubevirtv1.DomainSpec{
+									Devices: kubevirtv1.Devices{
+										Disks: []kubevirtv1.Disk{
+											{
+												Name: "cdrom0",
+												DiskDevice: kubevirtv1.DiskDevice{
+													CDRom: &kubevirtv1.CDRomTarget{
+														Bus: kubevirtv1.DiskBusSATA,
+													},
+												},
+											},
+										},
+									},
+								},
+								Volumes: []kubevirtv1.Volume{
+									{
+										Name: "cdrom0",
+										VolumeSource: kubevirtv1.VolumeSource{
+											PersistentVolumeClaim: &kubevirtv1.PersistentVolumeClaimVolumeSource{
+												PersistentVolumeClaimVolumeSource: corev1.PersistentVolumeClaimVolumeSource{
+													ClaimName: "test-vm-bootiso",
+												},
+											},
 										},
 									},
 								},
 							},
 						},
-						"volumes": []interface{}{
-							map[string]interface{}{
-								"name": "cdrom0-volume", // Volume name matches volumeName
-								"persistentVolumeClaim": map[string]interface{}{
-									"claimName": "test-vm-bootiso",
-								},
-							},
-						},
 					},
-				},
+				}
+				mockClient.AddVM(vm)
 			},
-		}
-
-		// Case 3: volumeName is empty (fallback behavior)
-		vmSpec3 := map[string]interface{}{
-			"spec": map[string]interface{}{
-				"template": map[string]interface{}{
-					"spec": map[string]interface{}{
-						"domain": map[string]interface{}{
-							"devices": map[string]interface{}{
-								"disks": []interface{}{
-									map[string]interface{}{
-										"name": "cdrom0",
-										// volumeName is missing - should fallback to disk name
-										"cdrom": map[string]interface{}{
-											"bus": "sata",
+			setupPVC: func(fakeK8sClient *fake.Clientset) {
+				pvc := &corev1.PersistentVolumeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm-bootiso",
+						Namespace: "test-namespace",
+					},
+					Status: corev1.PersistentVolumeClaimStatus{
+						Phase: corev1.ClaimPending, // Not bound
+					},
+				}
+				fakeK8sClient.CoreV1().PersistentVolumeClaims("test-namespace").Create(
+					context.Background(), pvc, metav1.CreateOptions{})
+			},
+			mediaID:        "cdrom0",
+			expectedResult: false,
+		},
+		{
+			name: "Non-existent CD-ROM device returns false",
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Domain: kubevirtv1.DomainSpec{
+									Devices: kubevirtv1.Devices{
+										Disks: []kubevirtv1.Disk{
+											{
+												Name: "rootdisk",
+												DiskDevice: kubevirtv1.DiskDevice{
+													Disk: &kubevirtv1.DiskTarget{
+														Bus: kubevirtv1.DiskBusVirtio,
+													},
+												},
+											},
+										},
+									},
+								},
+								Volumes: []kubevirtv1.Volume{
+									{
+										Name: "rootdisk",
+										VolumeSource: kubevirtv1.VolumeSource{
+											DataVolume: &kubevirtv1.DataVolumeSource{Name: "my-dv"},
 										},
 									},
 								},
 							},
 						},
-						"volumes": []interface{}{
-							map[string]interface{}{
-								"name": "cdrom0", // Volume name matches disk name (fallback)
-								"persistentVolumeClaim": map[string]interface{}{
-									"claimName": "test-vm-bootiso",
+					},
+				}
+				mockClient.AddVM(vm)
+			},
+			setupPVC:       func(fakeK8sClient *fake.Clientset) {},
+			mediaID:        "cdrom0", // Looking for cdrom0 but VM only has rootdisk
+			expectedResult: false,
+		},
+		{
+			name: "CD-ROM without PVC returns false",
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Domain: kubevirtv1.DomainSpec{
+									Devices: kubevirtv1.Devices{
+										Disks: []kubevirtv1.Disk{
+											{
+												Name: "cdrom0",
+												DiskDevice: kubevirtv1.DiskDevice{
+													CDRom: &kubevirtv1.CDRomTarget{
+														Bus: kubevirtv1.DiskBusSATA,
+													},
+												},
+											},
+										},
+									},
+								},
+								Volumes: []kubevirtv1.Volume{
+									{
+										Name: "cdrom0",
+										VolumeSource: kubevirtv1.VolumeSource{
+											// Using CloudInit instead of PVC
+											CloudInitNoCloud: &kubevirtv1.CloudInitNoCloudSource{
+												UserData: "#cloud-config",
+											},
+										},
+									},
 								},
 							},
 						},
 					},
-				},
+				}
+				mockClient.AddVM(vm)
 			},
-		}
+			setupPVC:       func(fakeK8sClient *fake.Clientset) {},
+			mediaID:        "cdrom0",
+			expectedResult: false,
+		},
+	}
 
-		// Test that our volumeName logic correctly identifies the right volume reference
-		testCases := []struct {
-			name     string
-			vmSpec   map[string]interface{}
-			expected string
-		}{
-			{
-				name:     "volumeName_equals_disk_name",
-				vmSpec:   vmSpec1,
-				expected: "cdrom0",
-			},
-			{
-				name:     "volumeName_different_from_disk_name",
-				vmSpec:   vmSpec2,
-				expected: "cdrom0-volume",
-			},
-			{
-				name:     "volumeName_empty_fallback",
-				vmSpec:   vmSpec3,
-				expected: "cdrom0",
-			},
-		}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create mock clients
+			mockDynamicClient := NewMockDynamicClient()
+			fakeK8sClient := fake.NewSimpleClientset()
 
-		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
-				// Extract the volume reference logic from IsVirtualMediaInserted
-				vm := &unstructured.Unstructured{}
-				vm.SetUnstructuredContent(tc.vmSpec)
+			// Setup test data
+			tc.setupVM(mockDynamicClient)
+			tc.setupPVC(fakeK8sClient)
 
-				// Step 1: Find the CD-ROM device and get volumeName
-				var volumeRef string
-				devices, found, err := unstructured.NestedMap(vm.Object, "spec", "template", "spec", "domain", "devices")
-				if err != nil || !found {
-					t.Fatalf("Failed to get devices: %v", err)
-				}
+			// Create client with mock clients
+			client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, nil)
 
-				if disks, found := devices["disks"].([]interface{}); found {
-					for _, disk := range disks {
-						if diskMap, ok := disk.(map[string]interface{}); ok {
-							if diskName, found := diskMap["name"].(string); found && diskName == "cdrom0" {
-								if cdrom, found := diskMap["cdrom"]; found && cdrom != nil {
-									// This is the key logic we're testing
-									if vol, ok := diskMap["volumeName"].(string); ok && vol != "" {
-										volumeRef = vol
-									} else {
-										volumeRef = diskName
-									}
-									break
-								}
-							}
-						}
-					}
-				}
+			// Call the actual IsVirtualMediaInserted function
+			result, err := client.IsVirtualMediaInserted("test-namespace", "test-vm", tc.mediaID)
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
 
-				// Verify the volume reference is correct
-				if volumeRef != tc.expected {
-					t.Errorf("Expected volumeRef to be %s, got %s", tc.expected, volumeRef)
-				}
-
-				// Step 2: Verify the volume lookup works with the correct volumeRef
-				volumes, found, err := unstructured.NestedSlice(vm.Object, "spec", "template", "spec", "volumes")
-				if err != nil || !found {
-					t.Fatalf("Failed to get volumes: %v", err)
-				}
-
-				var foundVolume bool
-				for _, volume := range volumes {
-					if volumeMap, ok := volume.(map[string]interface{}); ok {
-						if volumeName, found := volumeMap["name"].(string); found && volumeName == volumeRef {
-							foundVolume = true
-							break
-						}
-					}
-				}
-
-				if !foundVolume {
-					t.Errorf("Failed to find volume with name %s", volumeRef)
-				}
-
-				t.Logf("Test %s passed: volumeRef=%s, foundVolume=%v", tc.name, volumeRef, foundVolume)
-			})
-		}
-	})
+			if result != tc.expectedResult {
+				t.Errorf("Expected IsVirtualMediaInserted to return %v, got %v", tc.expectedResult, result)
+			}
+		})
+	}
 }
 
 func TestClient_DownloadISO(t *testing.T) {
@@ -867,129 +618,6 @@ func TestClient_DownloadISO(t *testing.T) {
 	_, err = client.downloadISO("")
 	if err == nil {
 		t.Error("Expected error with empty URL")
-	}
-}
-
-func TestClient_InsertVirtualMedia(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		dynamicClient: nil, // Will cause error in GetVM
-	}
-
-	// Test virtual media insertion failure - should return error, not panic
-	err := client.InsertVirtualMedia("test-namespace", "test-vm", "cdrom0", "http://example.com/iso")
-	if err == nil {
-		t.Error("Expected error when dynamic client is nil")
-	}
-}
-
-func TestClient_EjectVirtualMedia(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		dynamicClient: nil, // Will cause error in GetVM
-	}
-
-	// Test virtual media ejection failure - should return error, not panic
-	err := client.EjectVirtualMedia("test-namespace", "test-vm", "cdrom0")
-	if err == nil {
-		t.Error("Expected error when dynamic client is nil")
-	}
-}
-
-func TestClient_SetBootOrder(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		dynamicClient: nil, // Will cause error in GetVM
-	}
-
-	// Test boot order setting failure - should return error, not panic
-	err := client.SetBootOrder("test-namespace", "test-vm", "cdrom")
-	if err == nil {
-		t.Error("Expected error when dynamic client is nil")
-	}
-}
-
-func TestClient_SetBootOnce(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		dynamicClient: nil, // Will cause error in GetVM
-	}
-
-	// Test boot once setting failure - should return error, not panic
-	err := client.SetBootOnce("test-namespace", "test-vm", "cdrom")
-	if err == nil {
-		t.Error("Expected error when dynamic client is nil")
-	}
-}
-
-func TestClient_ListVMs(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		dynamicClient: nil, // Will cause panic
-	}
-
-	// Test list VMs failure - this will panic, so we need to recover
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected panic when dynamic client is nil")
-		}
-	}()
-
-	//nolint:errcheck // We expect this to panic, not return an error
-	client.ListVMs("test-namespace")
-	t.Error("Expected panic, but function completed normally")
-}
-
-func TestClient_ListVMsWithSelector(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		dynamicClient: nil, // Will cause error
-	}
-
-	selector := &VMSelectorConfig{
-		Labels: map[string]string{"app": "test"},
-		Names:  []string{"vm1", "vm2"},
-	}
-
-	// Test list VMs with selector failure - should return error, not panic
-	vms, err := client.ListVMsWithSelector("test-namespace", selector)
-	if err == nil {
-		t.Error("Expected error when dynamic client is nil")
-	}
-	if vms != nil {
-		t.Error("Expected nil result when dynamic client is nil")
-	}
-}
-
-func TestClient_GetVM(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		dynamicClient: nil, // Will cause error
-	}
-
-	// Test get VM failure - should return error, not panic
-	vm, err := client.GetVM("test-namespace", "test-vm")
-	if err == nil {
-		t.Error("Expected error when dynamic client is nil")
-	}
-	if vm != nil {
-		t.Error("Expected nil VM when dynamic client is nil")
-	}
-}
-
-func TestClient_GetVMPowerState(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		dynamicClient: nil, // Will cause error in GetVM
-	}
-
-	// Test power state retrieval failure - should return error, not panic
-	state, err := client.GetVMPowerState("test-namespace", "test-vm")
-	if err == nil {
-		t.Error("Expected error when dynamic client is nil")
-	}
-	if state != "Unknown" {
-		t.Errorf("Expected 'Unknown' state when dynamic client is nil, got: %s", state)
 	}
 }
 
@@ -1046,105 +674,9 @@ func TestClient_UnpauseVMI(t *testing.T) {
 	}
 }
 
-func TestClient_UploadISOToDataVolume(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		kubernetesClient: nil, // Will cause error in getUploadProxyURL
-	}
-
-	// Test upload failure - should return error, not panic
-	err := client.uploadISOToDataVolume("test-namespace", "test-dv", "/path/to/iso")
-	if err == nil {
-		t.Error("Expected error when kubernetes client is nil")
-	}
-}
-
-func TestClient_CopyISOToPVC(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		kubernetesClient: nil, // Will cause panic in getUploadProxyURL
-	}
-
-	// Test with invalid parameters - this will panic, so we need to recover
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected panic when kubernetes client is nil")
-		}
-	}()
-
-	client.copyISOToPVC("test-namespace", "test-dv", "http://example.com/iso", "30s")
-	t.Error("Expected panic, but function completed normally")
-}
-
-func TestClient_CreateCertConfigMap(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		kubernetesClient: nil, // Will cause panic
-	}
-
-	// Test with invalid parameters - this will panic, so we need to recover
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected panic when kubernetes client is nil")
-		}
-	}()
-
-	client.createCertConfigMap("test-namespace", "test-configmap", "http://example.com/iso")
-	t.Error("Expected panic, but function completed normally")
-}
-
-func TestClient_FetchServerCertificate(t *testing.T) {
-	// Create a mock client
-	client := &Client{}
-
-	// Test with invalid host
-	_, err := client.fetchServerCertificate("")
-	if err == nil {
-		t.Error("Expected error with empty host")
-	}
-
-	// Test with invalid host format
-	_, err = client.fetchServerCertificate("invalid-host")
-	if err == nil {
-		t.Error("Expected error with invalid host format")
-	}
-}
-
 // =============================================================================
 // EDGE CASES AND ERROR CONDITIONS
 // =============================================================================
-
-func TestClient_GetVMMemory_EdgeCases(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		dynamicClient: nil, // Will cause error in GetVM
-	}
-
-	// Test with empty namespace - should return default value
-	memory, err := client.GetVMMemory("", "test-vm")
-	if err != nil {
-		t.Errorf("Expected no error, got: %v", err)
-	}
-	if memory != 2.0 {
-		t.Errorf("Expected default memory 2.0, got: %f", memory)
-	}
-}
-
-func TestClient_GetVMCPU_EdgeCases(t *testing.T) {
-	// Create a mock client
-	client := &Client{
-		dynamicClient: nil, // Will cause error in GetVM
-	}
-
-	// Test with empty namespace - should return default value
-	cpu, err := client.GetVMCPU("", "test-vm")
-	if err != nil {
-		t.Errorf("Expected no error, got: %v", err)
-	}
-	if cpu != 1 {
-		t.Errorf("Expected default CPU 1, got: %d", cpu)
-	}
-}
 
 func TestClient_ConcurrentAccess(t *testing.T) {
 	// Create a mock client
@@ -1195,206 +727,6 @@ func TestVMSelectorConfig_Validation(t *testing.T) {
 	}
 }
 
-// Test executePauseRequestWithDynamicClient function
-func TestClient_ExecutePauseRequestWithDynamicClient(t *testing.T) {
-	ctx := context.Background()
-	namespace := "test-namespace"
-	name := "test-vmi"
-	correlationID := "test-correlation-id"
-
-	// Test with nil client (should panic, but we can test the panic)
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected panic with nil client")
-		}
-	}()
-
-	var client *Client
-	client.executePauseRequestWithDynamicClient(ctx, namespace, name, correlationID)
-}
-
-// Test executePauseRequestWithDynamicClient with invalid config
-func TestClient_ExecutePauseRequestWithDynamicClient_InvalidConfig(t *testing.T) {
-	// Create a mock client with invalid config
-	client := &Client{
-		config: &rest.Config{
-			Host: "invalid://host",
-		},
-		timeout: 30 * time.Second,
-	}
-
-	ctx := context.Background()
-	namespace := "test-namespace"
-	name := "test-vmi"
-	correlationID := "test-correlation-id"
-
-	// Test with invalid config (should fail)
-	err := client.executePauseRequestWithDynamicClient(ctx, namespace, name, correlationID)
-	if err == nil {
-		t.Error("Expected error with invalid config")
-	}
-}
-
-// Test executeUnpauseRequestWithDynamicClient function
-func TestClient_ExecuteUnpauseRequestWithDynamicClient(t *testing.T) {
-	ctx := context.Background()
-	namespace := "test-namespace"
-	name := "test-vmi"
-	correlationID := "test-correlation-id"
-
-	// Test with nil client (should panic, but we can test the panic)
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected panic with nil client")
-		}
-	}()
-
-	var client *Client
-	client.executeUnpauseRequestWithDynamicClient(ctx, namespace, name, correlationID)
-}
-
-// Test executeUnpauseRequestWithDynamicClient with invalid config
-func TestClient_ExecuteUnpauseRequestWithDynamicClient_InvalidConfig(t *testing.T) {
-	// Create a mock client with invalid config
-	client := &Client{
-		config: &rest.Config{
-			Host: "invalid://host",
-		},
-		timeout: 30 * time.Second,
-	}
-
-	ctx := context.Background()
-	namespace := "test-namespace"
-	name := "test-vmi"
-	correlationID := "test-correlation-id"
-
-	// Test with invalid config (should fail)
-	err := client.executeUnpauseRequestWithDynamicClient(ctx, namespace, name, correlationID)
-	if err == nil {
-		t.Error("Expected error with invalid config")
-	}
-}
-
-// Test getUploadProxyURL function with various scenarios
-func TestClient_GetUploadProxyURL_EdgeCases(t *testing.T) {
-	// Test with nil client (should panic)
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected panic with nil client")
-		}
-	}()
-
-	var client *Client
-	client.getUploadProxyURL()
-}
-
-// Test getUploadProxyURL function with nil kubernetes client
-func TestClient_GetUploadProxyURL_NilKubeClient(t *testing.T) {
-	// Test with nil kubernetes client (should return error)
-	client := &Client{
-		kubernetesClient: nil,
-		timeout:          30 * time.Second,
-	}
-
-	url, err := client.getUploadProxyURL()
-	if err == nil {
-		t.Error("Expected error with nil kubernetes client")
-	}
-	if url != "" {
-		t.Error("Expected empty URL with nil kubernetes client")
-	}
-}
-
-// Test createCertConfigMap function with various scenarios
-func TestClient_CreateCertConfigMap_EdgeCases(t *testing.T) {
-	// Test with nil client (should panic)
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected panic with nil client")
-		}
-	}()
-
-	var client *Client
-	client.createCertConfigMap("test-namespace", "test-configmap", "invalid-url")
-}
-
-// Test createCertConfigMap function with invalid URL
-func TestClient_CreateCertConfigMap_InvalidURL(t *testing.T) {
-	// Test with invalid URL (should panic due to nil kubernetes client)
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected panic with nil kubernetes client")
-		}
-	}()
-
-	client := &Client{
-		timeout: 30 * time.Second,
-	}
-	client.createCertConfigMap("test-namespace", "test-configmap", "invalid-url")
-}
-
-// Test createCertConfigMap function with valid URL but nil kubernetes client
-func TestClient_CreateCertConfigMap_NilKubeClient(t *testing.T) {
-	// Test with valid URL but nil kubernetes client (should panic)
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected panic with nil kubernetes client")
-		}
-	}()
-
-	client := &Client{
-		timeout: 30 * time.Second,
-	}
-	client.createCertConfigMap("test-namespace", "test-configmap", "https://example.com/image.iso")
-}
-
-// Test fetchServerCertificate function with various scenarios
-func TestClient_FetchServerCertificate_EdgeCases(t *testing.T) {
-	// Test with nil client (should not panic, but will fail with connection error)
-	var client *Client
-	_, err := client.fetchServerCertificate("invalid-host")
-	if err == nil {
-		t.Error("Expected error with nil client")
-	}
-}
-
-// Test fetchServerCertificate function with empty host
-func TestClient_FetchServerCertificate_EmptyHost(t *testing.T) {
-	// Test with empty host
-	client := &Client{
-		timeout: 30 * time.Second,
-	}
-	_, err := client.fetchServerCertificate("")
-	if err == nil {
-		t.Error("Expected error with empty host")
-	}
-}
-
-// Test fetchServerCertificate function with invalid host
-func TestClient_FetchServerCertificate_InvalidHost(t *testing.T) {
-	// Test with invalid host
-	client := &Client{
-		timeout: 30 * time.Second,
-	}
-	_, err := client.fetchServerCertificate("invalid-host:invalid-port")
-	if err == nil {
-		t.Error("Expected error with invalid host")
-	}
-}
-
-// Test getDataVolumeConfig function with nil client
-func TestClient_GetDataVolumeConfig_NilClient(t *testing.T) {
-	// Test with nil client (should panic)
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected panic with nil client")
-		}
-	}()
-
-	var client *Client
-	client.getDataVolumeConfig()
-}
-
 // Test getDataVolumeConfig function with nil appConfig
 func TestClient_GetDataVolumeConfig_NilAppConfig(t *testing.T) {
 	// Test with client but nil appConfig
@@ -1406,19 +738,6 @@ func TestClient_GetDataVolumeConfig_NilAppConfig(t *testing.T) {
 	if storageSize != "10Gi" || allowInsecureTLS || storageClass != "" || vmUpdateTimeout != "30s" || isoDownloadTimeout != "30m" || helperImage != "alpine:latest" {
 		t.Error("Expected default values with nil appConfig")
 	}
-}
-
-// Test getKubeVirtConfig function with nil client
-func TestClient_GetKubeVirtConfig_NilClient(t *testing.T) {
-	// Test with nil client (should panic)
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected panic with nil client")
-		}
-	}()
-
-	var client *Client
-	client.getKubeVirtConfig()
 }
 
 // Test getKubeVirtConfig function with nil appConfig
@@ -1434,268 +753,274 @@ func TestClient_GetKubeVirtConfig_NilAppConfig(t *testing.T) {
 	}
 }
 
-// Test cleanupExistingDataVolume function
-func TestClient_CleanupExistingDataVolume_EdgeCases(t *testing.T) {
-	// Test with nil client (should panic)
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected panic with nil client")
-		}
-	}()
-
-	var client *Client
-	client.cleanupExistingDataVolume("test-namespace", "test-datavolume")
-}
-
-// Test cleanupExistingDataVolume function with nil kubernetes client
-func TestClient_CleanupExistingDataVolume_NilKubeClient(t *testing.T) {
-	// Test with nil kubernetes client (should return error)
-	client := &Client{
-		timeout: 30 * time.Second,
-	}
-
-	err := client.cleanupExistingDataVolume("test-namespace", "test-datavolume")
-	if err == nil {
-		t.Error("Expected error with nil kubernetes client")
-	}
-}
-
-// TestGetVMPowerState tests the GetVMPowerState function with various scenarios
+// TestGetVMPowerState tests the GetVMPowerState function with various scenarios using MockDynamicClient
 func TestGetVMPowerState(t *testing.T) {
-	// Test cases for different power states
-
-	// Test cases for different power states
 	testCases := []struct {
-		name      string
-		vmStatus  map[string]interface{}
-		vmiStatus map[string]interface{}
-		expected  string
-		expectErr bool
+		name     string
+		setupVM  func(mockClient *MockDynamicClient)
+		expected string
 	}{
 		{
 			name: "VM running",
-			vmStatus: map[string]interface{}{
-				"status": map[string]interface{}{
-					"printableStatus": "Running",
-				},
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Status: kubevirtv1.VirtualMachineStatus{
+						PrintableStatus: kubevirtv1.VirtualMachinePrintableStatus("Running"),
+					},
+				}
+				mockClient.AddVM(vm)
 			},
 			expected: "On",
 		},
 		{
 			name: "VM stopped",
-			vmStatus: map[string]interface{}{
-				"status": map[string]interface{}{
-					"printableStatus": "Stopped",
-				},
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Status: kubevirtv1.VirtualMachineStatus{
+						PrintableStatus: kubevirtv1.VirtualMachinePrintableStatus("Stopped"),
+					},
+				}
+				mockClient.AddVM(vm)
 			},
 			expected: "Off",
 		},
 		{
 			name: "VM stopping",
-			vmStatus: map[string]interface{}{
-				"status": map[string]interface{}{
-					"printableStatus": "Stopping",
-				},
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Status: kubevirtv1.VirtualMachineStatus{
+						PrintableStatus: kubevirtv1.VirtualMachinePrintableStatus("Stopping"),
+					},
+				}
+				mockClient.AddVM(vm)
 			},
 			expected: "ShuttingDown",
 		},
 		{
 			name: "VM starting",
-			vmStatus: map[string]interface{}{
-				"status": map[string]interface{}{
-					"printableStatus": "Starting",
-				},
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Status: kubevirtv1.VirtualMachineStatus{
+						PrintableStatus: kubevirtv1.VirtualMachinePrintableStatus("Starting"),
+					},
+				}
+				mockClient.AddVM(vm)
 			},
 			expected: "PoweringOn",
 		},
 		{
 			name: "VM force stopping",
-			vmStatus: map[string]interface{}{
-				"metadata": map[string]interface{}{
-					"annotations": map[string]interface{}{
-						"kubevirt.io/force-stop": "true",
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+						Annotations: map[string]string{
+							"kubevirt.io/force-stop": "true",
+						},
 					},
-				},
-				"status": map[string]interface{}{
-					"printableStatus": "Stopping",
-				},
+					Status: kubevirtv1.VirtualMachineStatus{
+						PrintableStatus: kubevirtv1.VirtualMachinePrintableStatus("Stopping"),
+					},
+				}
+				mockClient.AddVM(vm)
 			},
 			expected: "ForceOffInProgress",
 		},
 		{
 			name: "VM with PodTerminating condition",
-			vmStatus: map[string]interface{}{
-				"status": map[string]interface{}{
-					"conditions": []interface{}{
-						map[string]interface{}{
-							"type": "PodTerminating",
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Status: kubevirtv1.VirtualMachineStatus{
+						Conditions: []kubevirtv1.VirtualMachineCondition{
+							{
+								Type: kubevirtv1.VirtualMachineConditionType("PodTerminating"),
+							},
 						},
 					},
-				},
+				}
+				mockClient.AddVM(vm)
 			},
 			expected: "ShuttingDown",
 		},
 		{
 			name: "VM with state change requests",
-			vmStatus: map[string]interface{}{
-				"status": map[string]interface{}{
-					"stateChangeRequests": []interface{}{
-						map[string]interface{}{
-							"action": "Start",
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Status: kubevirtv1.VirtualMachineStatus{
+						StateChangeRequests: []kubevirtv1.VirtualMachineStateChangeRequest{
+							{
+								Action: kubevirtv1.StartRequest,
+							},
 						},
 					},
-				},
+				}
+				mockClient.AddVM(vm)
 			},
 			expected: "Transitioning",
 		},
 		{
-			name: "VMI running",
-			vmiStatus: map[string]interface{}{
-				"status": map[string]interface{}{
-					"phase": "Running",
-				},
+			name: "VMI running (fallback when VM has no printableStatus)",
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Status: kubevirtv1.VirtualMachineStatus{},
+				}
+				mockClient.AddVM(vm)
+
+				vmi := &kubevirtv1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Status: kubevirtv1.VirtualMachineInstanceStatus{
+						Phase: kubevirtv1.Running,
+					},
+				}
+				mockClient.AddVMI(vmi)
 			},
 			expected: "On",
 		},
 		{
 			name: "VMI paused",
-			vmiStatus: map[string]interface{}{
-				"status": map[string]interface{}{
-					"conditions": []interface{}{
-						map[string]interface{}{
-							"type":   "Paused",
-							"status": "True",
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Status: kubevirtv1.VirtualMachineStatus{},
+				}
+				mockClient.AddVM(vm)
+
+				vmi := &kubevirtv1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Status: kubevirtv1.VirtualMachineInstanceStatus{
+						Conditions: []kubevirtv1.VirtualMachineInstanceCondition{
+							{
+								Type:   kubevirtv1.VirtualMachineInstancePaused,
+								Status: corev1.ConditionTrue,
+							},
 						},
 					},
-				},
+				}
+				mockClient.AddVMI(vmi)
 			},
 			expected: "Paused",
 		},
 		{
 			name: "VMI failed",
-			vmiStatus: map[string]interface{}{
-				"status": map[string]interface{}{
-					"phase": "Failed",
-				},
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Status: kubevirtv1.VirtualMachineStatus{},
+				}
+				mockClient.AddVM(vm)
+
+				vmi := &kubevirtv1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Status: kubevirtv1.VirtualMachineInstanceStatus{
+						Phase: kubevirtv1.Failed,
+					},
+				}
+				mockClient.AddVMI(vmi)
 			},
 			expected: "Off",
 		},
 		{
 			name: "VMI pending",
-			vmiStatus: map[string]interface{}{
-				"status": map[string]interface{}{
-					"phase": "Pending",
-				},
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Status: kubevirtv1.VirtualMachineStatus{},
+				}
+				mockClient.AddVM(vm)
+
+				vmi := &kubevirtv1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Status: kubevirtv1.VirtualMachineInstanceStatus{
+						Phase: kubevirtv1.Pending,
+					},
+				}
+				mockClient.AddVMI(vmi)
 			},
 			expected: "PoweringOn",
 		},
 		{
-			name:     "No VMI exists",
+			name: "No VMI exists (VM stopped)",
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Status: kubevirtv1.VirtualMachineStatus{},
+				}
+				mockClient.AddVM(vm)
+				// No VMI added - simulates stopped VM
+			},
 			expected: "Off",
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Create mock VM object
-			vm := &unstructured.Unstructured{}
-			if tc.vmStatus != nil {
-				vm.SetUnstructuredContent(tc.vmStatus)
-			}
+			// Create mock clients
+			mockDynamicClient := NewMockDynamicClient()
+			fakeK8sClient := fake.NewSimpleClientset()
 
-			// Create mock VMI object
-			var vmi *unstructured.Unstructured
-			if tc.vmiStatus != nil {
-				vmi = &unstructured.Unstructured{}
-				vmi.SetUnstructuredContent(tc.vmiStatus)
-			}
+			// Setup test data
+			tc.setupVM(mockDynamicClient)
 
-			// Mock the dynamic client calls
-			// Note: In a real test, you would use a proper mock framework
-			// For now, we'll test the logic by creating the objects directly
+			// Create client with mock clients
+			client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, nil)
 
-			// Test the power state determination logic
-			var result string
-
-			// Simulate the logic from GetVMPowerState
-			if tc.vmStatus != nil {
-				if annotations, found, _ := unstructured.NestedStringMap(vm.Object, "metadata", "annotations"); found {
-					if annotations["kubevirt.io/force-stop"] == "true" {
-						if printableStatus, found, _ := unstructured.NestedString(vm.Object, "status", "printableStatus"); found {
-							if printableStatus == "Stopping" || printableStatus == "Terminating" {
-								result = "ForceOffInProgress"
-							}
-						}
-					}
-				}
-
-				if result == "" {
-					if printableStatus, found, _ := unstructured.NestedString(vm.Object, "status", "printableStatus"); found {
-						switch printableStatus {
-						case "Running":
-							result = "On"
-						case "Stopped":
-							result = "Off"
-						case "Stopping", "Terminating":
-							result = "ShuttingDown"
-						case "Starting":
-							result = "PoweringOn"
-						}
-					}
-				}
-
-				if result == "" {
-					if conditions, found, _ := unstructured.NestedSlice(vm.Object, "status", "conditions"); found {
-						for _, cond := range conditions {
-							if condMap, ok := cond.(map[string]interface{}); ok {
-								if typeStr, _ := condMap["type"].(string); typeStr == "PodTerminating" {
-									result = "ShuttingDown"
-									break
-								}
-							}
-						}
-					}
-				}
-
-				if result == "" {
-					if stateChangeRequests, found, _ := unstructured.NestedSlice(vm.Object, "status", "stateChangeRequests"); found && len(stateChangeRequests) > 0 {
-						result = "Transitioning"
-					}
-				}
-			}
-
-			// If no result from VM status, check VMI
-			if result == "" && tc.vmiStatus != nil {
-				if conditions, found, _ := unstructured.NestedSlice(vmi.Object, "status", "conditions"); found {
-					for _, cond := range conditions {
-						if condMap, ok := cond.(map[string]interface{}); ok {
-							if typeStr, _ := condMap["type"].(string); typeStr == "Paused" {
-								if statusStr, _ := condMap["status"].(string); statusStr == "True" {
-									result = "Paused"
-									break
-								}
-							}
-						}
-					}
-				}
-
-				if result == "" {
-					if phase, found, _ := unstructured.NestedString(vmi.Object, "status", "phase"); found {
-						switch phase {
-						case "Running", "Succeeded":
-							result = "On"
-						case "Failed":
-							result = "Off"
-						case "Pending":
-							result = "PoweringOn"
-						}
-					}
-				}
-			}
-
-			// Default to "Off" if no other state determined
-			if result == "" {
-				result = "Off"
+			// Call the actual GetVMPowerState function
+			result, err := client.GetVMPowerState("test-namespace", "test-vm")
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
 			}
 
 			if result != tc.expected {
@@ -1705,300 +1030,492 @@ func TestGetVMPowerState(t *testing.T) {
 	}
 }
 
-// TestSetVMPowerState tests the SetVMPowerState function
+// TestSetVMPowerState tests the SetVMPowerState function using MockDynamicClient
 func TestSetVMPowerState(t *testing.T) {
+	boolPtr := func(b bool) *bool { return &b }
 
-	// Test cases for different power state changes
 	testCases := []struct {
-		name      string
-		state     string
-		expectErr bool
+		name                string
+		state               string
+		expectErr           bool
+		errSubstr           string
+		expectedRunStrategy string // Expected runStrategy after the operation
+		initialRunning      *bool  // If set, the initial VM uses the legacy running field
 	}{
 		{
-			name:  "Power on",
-			state: "On",
+			name:                "Power on",
+			state:               "On",
+			expectedRunStrategy: "Always",
 		},
 		{
-			name:  "Force power off",
-			state: "ForceOff",
+			name:                "Force power off",
+			state:               "ForceOff",
+			expectedRunStrategy: "Halted",
+		},
+		{
+			name:                "Graceful shutdown",
+			state:               "GracefulShutdown",
+			expectedRunStrategy: "Halted",
+		},
+		{
+			name:                "Force restart",
+			state:               "ForceRestart",
+			expectedRunStrategy: "Always", // After restart, VM should be set to run
 		},
 		{
 			name:      "Invalid state",
 			state:     "InvalidState",
 			expectErr: true,
+			errSubstr: "unsupported power state",
+		},
+		{
+			name:                "Power off VM with legacy running=true",
+			state:               "GracefulShutdown",
+			initialRunning:      boolPtr(true),
+			expectedRunStrategy: "Halted",
+		},
+		{
+			name:                "Power on VM with legacy running=false",
+			state:               "On",
+			initialRunning:      boolPtr(false),
+			expectedRunStrategy: "Always",
+		},
+		{
+			name:                "Force off VM with legacy running=true",
+			state:               "ForceOff",
+			initialRunning:      boolPtr(true),
+			expectedRunStrategy: "Halted",
+		},
+		{
+			name:                "Force restart VM with legacy running=true",
+			state:               "ForceRestart",
+			initialRunning:      boolPtr(true),
+			expectedRunStrategy: "Always",
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Test the power state validation logic
-			var err error
+			// Create mock clients
+			mockDynamicClient := NewMockDynamicClient()
+			fakeK8sClient := fake.NewSimpleClientset()
 
-			// Simulate the validation logic from SetVMPowerState
-			switch tc.state {
-			case "On", "ForceOff":
-				// These are valid states
-				err = nil
-			default:
-				// Invalid state
-				err = fmt.Errorf("unsupported power state: %s", tc.state)
+			// Setup a VM in the mock
+			vm := &kubevirtv1.VirtualMachine{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-vm",
+					Namespace: "test-namespace",
+				},
+				Spec: kubevirtv1.VirtualMachineSpec{
+					RunStrategy: func() *kubevirtv1.VirtualMachineRunStrategy {
+						s := kubevirtv1.RunStrategyAlways
+						return &s
+					}(),
+				},
+				Status: kubevirtv1.VirtualMachineStatus{
+					PrintableStatus: kubevirtv1.VirtualMachinePrintableStatus("Running"),
+				},
 			}
 
-			if tc.expectErr && err == nil {
-				t.Error("Expected error for invalid power state")
+			if tc.initialRunning != nil {
+				// Use the legacy running field alongside runStrategy
+				vm.Spec.Running = tc.initialRunning
 			}
-			if !tc.expectErr && err != nil {
+
+			mockDynamicClient.AddVM(vm)
+
+			// Also add a VMI for some operations that need it
+			gracePeriod := int64(30)
+			vmi := &kubevirtv1.VirtualMachineInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-vm",
+					Namespace: "test-namespace",
+				},
+				Spec: kubevirtv1.VirtualMachineInstanceSpec{
+					TerminationGracePeriodSeconds: &gracePeriod,
+				},
+				Status: kubevirtv1.VirtualMachineInstanceStatus{
+					Phase: kubevirtv1.Running,
+				},
+			}
+			mockDynamicClient.AddVMI(vmi)
+
+			// Create client with mock clients
+			client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, nil)
+
+			// Call the actual SetVMPowerState function
+			err := client.SetVMPowerState("test-namespace", "test-vm", tc.state)
+
+			if tc.expectErr {
+				if err == nil {
+					t.Error("Expected error but got none")
+				} else if tc.errSubstr != "" && !strings.Contains(err.Error(), tc.errSubstr) {
+					t.Errorf("Expected error containing '%s', got: %v", tc.errSubstr, err)
+				}
+				return // Skip verification for error cases
+			}
+
+			if err != nil {
 				t.Errorf("Unexpected error: %v", err)
+				return
 			}
-		})
-	}
-}
 
-// TestVMNetworkInterfaces tests the GetVMNetworkInterfaces function
-func TestVMNetworkInterfaces(t *testing.T) {
+			// Verify the VM was actually updated in the mock
+			updatedVM, err := mockDynamicClient.GetVM("test-namespace", "test-vm")
+			if err != nil {
+				t.Fatalf("Failed to retrieve updated VM from mock: %v", err)
+			}
 
-	// Test cases for network interfaces
-	testCases := []struct {
-		name     string
-		vmSpec   map[string]interface{}
-		expected int // expected number of interfaces
-	}{
-		{
-			name: "VM with network interfaces",
-			vmSpec: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"template": map[string]interface{}{
-						"spec": map[string]interface{}{
-							"networks": []interface{}{
-								map[string]interface{}{
-									"name": "default",
-									"pod":  map[string]interface{}{},
-								},
-							},
-							"domain": map[string]interface{}{
-								"devices": map[string]interface{}{
-									"interfaces": []interface{}{
-										map[string]interface{}{
-											"name": "default",
-											"bridge": map[string]interface{}{
-												"{}": "{}",
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-			expected: 1,
-		},
-		{
-			name: "VM without network interfaces",
-			vmSpec: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"template": map[string]interface{}{
-						"spec": map[string]interface{}{
-							"networks": []interface{}{},
-							"domain": map[string]interface{}{
-								"devices": map[string]interface{}{
-									"interfaces": []interface{}{},
-								},
-							},
-						},
-					},
-				},
-			},
-			expected: 0,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Create mock VM object
-			vm := &unstructured.Unstructured{}
-			vm.SetUnstructuredContent(tc.vmSpec)
-
-			// Simulate the network interface extraction logic
-			var interfaces []interface{}
-
-			if _, found, _ := unstructured.NestedSlice(vm.Object, "spec", "template", "spec", "networks"); found {
-				if devices, found, _ := unstructured.NestedMap(vm.Object, "spec", "template", "spec", "domain", "devices"); found {
-					if deviceInterfaces, found, _ := unstructured.NestedSlice(devices, "interfaces"); found {
-						interfaces = deviceInterfaces
-					}
+			// Check that runStrategy was updated correctly
+			if updatedVM.Spec.RunStrategy == nil {
+				t.Errorf("Expected runStrategy to be set, but it was nil")
+			} else {
+				actualRunStrategy := string(*updatedVM.Spec.RunStrategy)
+				if actualRunStrategy != tc.expectedRunStrategy {
+					t.Errorf("Expected runStrategy '%s', got '%s'", tc.expectedRunStrategy, actualRunStrategy)
 				}
 			}
 
-			if len(interfaces) != tc.expected {
-				t.Errorf("Expected %d interfaces, got %d", tc.expected, len(interfaces))
+			// Check that the legacy running field was cleared
+			if updatedVM.Spec.Running != nil {
+				t.Errorf("Expected running field to be nil after power state change, but got %v", *updatedVM.Spec.Running)
+			}
+
+			// For ForceOff, also check the force-stop annotation
+			if tc.state == "ForceOff" {
+				annotations := updatedVM.GetAnnotations()
+				if annotations == nil || annotations["kubevirt.io/force-stop"] != "true" {
+					t.Errorf("Expected force-stop annotation to be set for ForceOff state")
+				}
+			}
+
+			// For ForceOff and ForceRestart, verify terminationGracePeriodSeconds was set to 0 on the VMI
+			if tc.state == "ForceOff" || tc.state == "ForceRestart" {
+				updatedVMI, err := mockDynamicClient.GetVMI("test-namespace", "test-vm")
+				if err != nil {
+					t.Fatalf("Failed to retrieve updated VMI from mock: %v", err)
+				}
+				if updatedVMI.Spec.TerminationGracePeriodSeconds == nil {
+					t.Error("Expected VMI terminationGracePeriodSeconds to be set, got nil")
+				} else if *updatedVMI.Spec.TerminationGracePeriodSeconds != 0 {
+					t.Errorf("Expected VMI terminationGracePeriodSeconds=0, got %d", *updatedVMI.Spec.TerminationGracePeriodSeconds)
+				}
 			}
 		})
 	}
 }
 
-// TestVMStorage tests the GetVMStorage function
-func TestVMStorage(t *testing.T) {
-
-	// Test cases for VM storage
+// TestVMNetworkInterfaces tests the GetVMNetworkInterfaces function using MockDynamicClient
+func TestVMNetworkInterfaces(t *testing.T) {
 	testCases := []struct {
 		name     string
-		vmSpec   map[string]interface{}
-		expected int // expected number of volumes
+		setupVMI func(mockClient *MockDynamicClient)
+		expected []string
+	}{
+		{
+			name: "VMI with network interfaces",
+			setupVMI: func(mockClient *MockDynamicClient) {
+				vmi := &kubevirtv1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Status: kubevirtv1.VirtualMachineInstanceStatus{
+						Phase: kubevirtv1.Running,
+						Interfaces: []kubevirtv1.VirtualMachineInstanceNetworkInterface{
+							{Name: "default", MAC: "00:11:22:33:44:55", IP: "10.0.0.1"},
+							{Name: "secondary", MAC: "00:11:22:33:44:66", IP: "10.0.0.2"},
+						},
+					},
+				}
+				mockClient.AddVMI(vmi)
+			},
+			expected: []string{"default", "secondary"},
+		},
+		{
+			name: "VMI without network interfaces",
+			setupVMI: func(mockClient *MockDynamicClient) {
+				vmi := &kubevirtv1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Status: kubevirtv1.VirtualMachineInstanceStatus{
+						Phase:      kubevirtv1.Running,
+						Interfaces: []kubevirtv1.VirtualMachineInstanceNetworkInterface{},
+					},
+				}
+				mockClient.AddVMI(vmi)
+			},
+			expected: nil,
+		},
+		{
+			name: "VMI with single interface",
+			setupVMI: func(mockClient *MockDynamicClient) {
+				vmi := &kubevirtv1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Status: kubevirtv1.VirtualMachineInstanceStatus{
+						Phase: kubevirtv1.Running,
+						Interfaces: []kubevirtv1.VirtualMachineInstanceNetworkInterface{
+							{Name: "eth0", MAC: "00:11:22:33:44:55"},
+						},
+					},
+				}
+				mockClient.AddVMI(vmi)
+			},
+			expected: []string{"eth0"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create mock clients
+			mockDynamicClient := NewMockDynamicClient()
+			fakeK8sClient := fake.NewSimpleClientset()
+
+			// Setup test data
+			tc.setupVMI(mockDynamicClient)
+
+			// Create client with mock clients
+			client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, nil)
+
+			// Call the actual GetVMNetworkInterfaces function
+			interfaces, err := client.GetVMNetworkInterfaces("test-namespace", "test-vm")
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			if len(interfaces) != len(tc.expected) {
+				t.Errorf("Expected %d interfaces, got %d", len(tc.expected), len(interfaces))
+				return
+			}
+
+			for i, expected := range tc.expected {
+				if interfaces[i] != expected {
+					t.Errorf("Expected interface[%d] = '%s', got '%s'", i, expected, interfaces[i])
+				}
+			}
+		})
+	}
+}
+
+// TestVMStorage tests the GetVMStorage function using MockDynamicClient
+func TestVMStorage(t *testing.T) {
+	testCases := []struct {
+		name     string
+		setupVM  func(mockClient *MockDynamicClient)
+		expected []string
 	}{
 		{
 			name: "VM with storage volumes",
-			vmSpec: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"template": map[string]interface{}{
-						"spec": map[string]interface{}{
-							"volumes": []interface{}{
-								map[string]interface{}{
-									"name": "containerdisk",
-									"containerDisk": map[string]interface{}{
-										"image": "kubevirt/cirros-container-disk-demo:latest",
-									},
-								},
-								map[string]interface{}{
-									"name": "cloudinitdisk",
-									"cloudInitNoCloud": map[string]interface{}{
-										"userData": "#cloud-config\npassword: fedora\nchpasswd: { expire: False }",
-									},
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Volumes: []kubevirtv1.Volume{
+									{Name: "containerdisk", VolumeSource: kubevirtv1.VolumeSource{ContainerDisk: &kubevirtv1.ContainerDiskSource{Image: "cirros"}}},
+									{Name: "cloudinitdisk", VolumeSource: kubevirtv1.VolumeSource{CloudInitNoCloud: &kubevirtv1.CloudInitNoCloudSource{UserData: "#cloud-config"}}},
 								},
 							},
 						},
 					},
-				},
+				}
+				mockClient.AddVM(vm)
 			},
-			expected: 2,
+			expected: []string{"containerdisk", "cloudinitdisk"},
 		},
 		{
 			name: "VM without storage volumes",
-			vmSpec: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"template": map[string]interface{}{
-						"spec": map[string]interface{}{
-							"volumes": []interface{}{},
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Volumes: []kubevirtv1.Volume{},
+							},
 						},
 					},
-				},
+				}
+				mockClient.AddVM(vm)
 			},
-			expected: 0,
+			expected: nil,
+		},
+		{
+			name: "VM with single data volume",
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Volumes: []kubevirtv1.Volume{
+									{Name: "rootdisk", VolumeSource: kubevirtv1.VolumeSource{DataVolume: &kubevirtv1.DataVolumeSource{Name: "my-dv"}}},
+								},
+							},
+						},
+					},
+				}
+				mockClient.AddVM(vm)
+			},
+			expected: []string{"rootdisk"},
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Create mock VM object
-			vm := &unstructured.Unstructured{}
-			vm.SetUnstructuredContent(tc.vmSpec)
+			// Create mock clients
+			mockDynamicClient := NewMockDynamicClient()
+			fakeK8sClient := fake.NewSimpleClientset()
 
-			// Simulate the storage volume extraction logic
-			var volumes []interface{}
+			// Setup test data
+			tc.setupVM(mockDynamicClient)
 
-			if volumesList, found, _ := unstructured.NestedSlice(vm.Object, "spec", "template", "spec", "volumes"); found {
-				volumes = volumesList
+			// Create client with mock clients
+			client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, nil)
+
+			// Call the actual GetVMStorage function
+			storage, err := client.GetVMStorage("test-namespace", "test-vm")
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
 			}
 
-			if len(volumes) != tc.expected {
-				t.Errorf("Expected %d volumes, got %d", tc.expected, len(volumes))
+			if len(storage) != len(tc.expected) {
+				t.Errorf("Expected %d volumes, got %d", len(tc.expected), len(storage))
+				return
+			}
+
+			for i, expected := range tc.expected {
+				if storage[i] != expected {
+					t.Errorf("Expected storage[%d] = '%s', got '%s'", i, expected, storage[i])
+				}
 			}
 		})
 	}
 }
 
-// TestVMBootOptions tests the GetVMBootOptions function
+// TestVMBootOptions tests the GetVMBootOptions function using MockDynamicClient
 func TestVMBootOptions(t *testing.T) {
-	// Test cases for VM boot options
 	testCases := []struct {
 		name     string
-		vmSpec   map[string]interface{}
+		setupVM  func(mockClient *MockDynamicClient)
 		expected map[string]interface{}
 	}{
 		{
-			name: "VM with boot options",
-			vmSpec: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"template": map[string]interface{}{
-						"spec": map[string]interface{}{
-							"domain": map[string]interface{}{
-								"firmware": map[string]interface{}{
-									"bootloader": map[string]interface{}{
-										"efi": map[string]interface{}{},
-									},
-								},
-								"devices": map[string]interface{}{
-									"bootOrder": []interface{}{
-										map[string]interface{}{
-											"device": "network",
-											"order":  float64(1),
-										},
-										map[string]interface{}{
-											"device": "disk",
-											"order":  float64(2),
+			name: "VM with EFI boot options",
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Domain: kubevirtv1.DomainSpec{
+									Firmware: &kubevirtv1.Firmware{
+										Bootloader: &kubevirtv1.Bootloader{
+											EFI: &kubevirtv1.EFI{},
 										},
 									},
 								},
 							},
 						},
 					},
-				},
+				}
+				mockClient.AddVM(vm)
 			},
 			expected: map[string]interface{}{
-				"BootSourceOverrideEnabled": "Once",
-				"BootSourceOverrideTarget":  "Pxe",
-				"BootSourceOverrideMode":    "UEFI",
+				"bootSourceOverrideEnabled": "Disabled",
+				"bootSourceOverrideTarget":  "None",
+				"bootSourceOverrideMode":    "UEFI",
 			},
 		},
 		{
-			name: "VM without boot options",
-			vmSpec: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"template": map[string]interface{}{
-						"spec": map[string]interface{}{
-							"domain": map[string]interface{}{
-								"devices": map[string]interface{}{},
+			name: "VM without boot options (legacy)",
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Domain: kubevirtv1.DomainSpec{},
 							},
 						},
 					},
-				},
+				}
+				mockClient.AddVM(vm)
 			},
 			expected: map[string]interface{}{
-				"BootSourceOverrideEnabled": "Disabled",
-				"BootSourceOverrideTarget":  "None",
-				"BootSourceOverrideMode":    "Legacy",
+				"bootSourceOverrideEnabled": "Disabled",
+				"bootSourceOverrideTarget":  "None",
+				"bootSourceOverrideMode":    "Legacy",
+			},
+		},
+		{
+			name: "VM with boot override annotations",
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+						Annotations: map[string]string{
+							"redfish.boot.source.override.enabled": "Once",
+							"redfish.boot.source.override.target":  "Pxe",
+							"redfish.boot.source.override.mode":    "UEFI",
+						},
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Domain: kubevirtv1.DomainSpec{},
+							},
+						},
+					},
+				}
+				mockClient.AddVM(vm)
+			},
+			expected: map[string]interface{}{
+				"bootSourceOverrideEnabled": "Once",
+				"bootSourceOverrideTarget":  "Pxe",
+				"bootSourceOverrideMode":    "UEFI",
 			},
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Create mock VM object
-			vm := &unstructured.Unstructured{}
-			vm.SetUnstructuredContent(tc.vmSpec)
+			// Create mock clients
+			mockDynamicClient := NewMockDynamicClient()
+			fakeK8sClient := fake.NewSimpleClientset()
 
-			// Simulate the boot options extraction logic
-			bootOptions := map[string]interface{}{
-				"BootSourceOverrideEnabled": "Disabled",
-				"BootSourceOverrideTarget":  "None",
-				"BootSourceOverrideMode":    "Legacy",
-			}
+			// Setup test data
+			tc.setupVM(mockDynamicClient)
 
-			// Check for EFI firmware
-			if firmware, found, _ := unstructured.NestedMap(vm.Object, "spec", "template", "spec", "domain", "firmware"); found {
-				if _, found, _ := unstructured.NestedMap(firmware, "bootloader", "efi"); found {
-					bootOptions["BootSourceOverrideMode"] = "UEFI"
-				}
-			}
+			// Create client with mock clients
+			client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, nil)
 
-			// Check for boot order
-			if bootOrder, found, _ := unstructured.NestedSlice(vm.Object, "spec", "template", "spec", "domain", "devices", "bootOrder"); found && len(bootOrder) > 0 {
-				bootOptions["BootSourceOverrideEnabled"] = "Once"
-				if firstBoot, ok := bootOrder[0].(map[string]interface{}); ok {
-					if device, _ := firstBoot["device"].(string); device == "network" {
-						bootOptions["BootSourceOverrideTarget"] = "Pxe"
-					}
-				}
+			// Call the actual GetVMBootOptions function
+			bootOptions, err := client.GetVMBootOptions("test-namespace", "test-vm")
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
 			}
 
 			// Compare results
@@ -2013,59 +1530,80 @@ func TestVMBootOptions(t *testing.T) {
 	}
 }
 
-// TestGetVMMemory tests the GetVMMemory function
+// TestGetVMMemory tests the GetVMMemory function using MockDynamicClient
 func TestGetVMMemory(t *testing.T) {
-
-	// Test cases for memory parsing
 	testCases := []struct {
 		name     string
-		vmSpec   map[string]interface{}
+		setupVM  func(mockClient *MockDynamicClient)
 		expected float64
 	}{
 		{
 			name: "VM with 48Gi memory",
-			vmSpec: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"template": map[string]interface{}{
-						"spec": map[string]interface{}{
-							"domain": map[string]interface{}{
-								"memory": map[string]interface{}{
-									"guest": "48Gi",
+			setupVM: func(mockClient *MockDynamicClient) {
+				guestMemory := resource.MustParse("48Gi")
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Domain: kubevirtv1.DomainSpec{
+									Memory: &kubevirtv1.Memory{
+										Guest: &guestMemory,
+									},
 								},
 							},
 						},
 					},
-				},
+				}
+				mockClient.AddVM(vm)
 			},
 			expected: 48.0,
 		},
 		{
 			name: "VM with 2048Mi memory",
-			vmSpec: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"template": map[string]interface{}{
-						"spec": map[string]interface{}{
-							"domain": map[string]interface{}{
-								"memory": map[string]interface{}{
-									"guest": "2048Mi",
+			setupVM: func(mockClient *MockDynamicClient) {
+				guestMemory := resource.MustParse("2048Mi")
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Domain: kubevirtv1.DomainSpec{
+									Memory: &kubevirtv1.Memory{
+										Guest: &guestMemory,
+									},
 								},
 							},
 						},
 					},
-				},
+				}
+				mockClient.AddVM(vm)
 			},
 			expected: 2.0, // 2048Mi / 1024 = 2.0GB
 		},
 		{
 			name: "VM without memory spec",
-			vmSpec: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"template": map[string]interface{}{
-						"spec": map[string]interface{}{
-							"domain": map[string]interface{}{},
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Domain: kubevirtv1.DomainSpec{},
+							},
 						},
 					},
-				},
+				}
+				mockClient.AddVM(vm)
 			},
 			expected: 2.0, // Default fallback
 		},
@@ -2073,34 +1611,20 @@ func TestGetVMMemory(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Create mock VM object
-			vm := &unstructured.Unstructured{}
-			vm.SetUnstructuredContent(tc.vmSpec)
+			// Create mock clients
+			mockDynamicClient := NewMockDynamicClient()
+			fakeK8sClient := fake.NewSimpleClientset()
 
-			// Simulate the memory extraction logic
-			var result float64
-			memory, found, err := unstructured.NestedString(vm.Object, "spec", "template", "spec", "domain", "memory", "guest")
-			if err != nil || !found {
-				result = 2.0 // Default fallback
-			} else {
-				// Parse memory string
-				if strings.HasSuffix(memory, "Gi") {
-					memoryStr := strings.TrimSuffix(memory, "Gi")
-					if memoryGB, err := strconv.ParseFloat(memoryStr, 64); err == nil {
-						result = memoryGB
-					} else {
-						result = 2.0 // Default fallback
-					}
-				} else if strings.HasSuffix(memory, "Mi") {
-					memoryStr := strings.TrimSuffix(memory, "Mi")
-					if memoryMB, err := strconv.ParseFloat(memoryStr, 64); err == nil {
-						result = memoryMB / 1024.0
-					} else {
-						result = 2.0 // Default fallback
-					}
-				} else {
-					result = 2.0 // Default fallback
-				}
+			// Setup test data
+			tc.setupVM(mockDynamicClient)
+
+			// Create client with mock clients
+			client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, nil)
+
+			// Call the actual GetVMMemory function
+			result, err := client.GetVMMemory("test-namespace", "test-vm")
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
 			}
 
 			if result != tc.expected {
@@ -2110,41 +1634,79 @@ func TestGetVMMemory(t *testing.T) {
 	}
 }
 
-// TestGetVMCPU tests the GetVMCPU function
+// TestGetVMCPU tests the GetVMCPU function using MockDynamicClient
 func TestGetVMCPU(t *testing.T) {
-	// Test cases for CPU parsing
 	testCases := []struct {
 		name     string
-		vmSpec   map[string]interface{}
+		setupVM  func(mockClient *MockDynamicClient)
 		expected int
 	}{
 		{
 			name: "VM with 4 CPU cores",
-			vmSpec: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"template": map[string]interface{}{
-						"spec": map[string]interface{}{
-							"domain": map[string]interface{}{
-								"cpu": map[string]interface{}{
-									"cores": int64(4),
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Domain: kubevirtv1.DomainSpec{
+									CPU: &kubevirtv1.CPU{
+										Cores: 4,
+									},
 								},
 							},
 						},
 					},
-				},
+				}
+				mockClient.AddVM(vm)
 			},
 			expected: 4,
 		},
 		{
-			name: "VM without CPU spec",
-			vmSpec: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"template": map[string]interface{}{
-						"spec": map[string]interface{}{
-							"domain": map[string]interface{}{},
+			name: "VM with 8 CPU cores and 2 sockets",
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Domain: kubevirtv1.DomainSpec{
+									CPU: &kubevirtv1.CPU{
+										Cores:   8,
+										Sockets: 2,
+									},
+								},
+							},
 						},
 					},
-				},
+				}
+				mockClient.AddVM(vm)
+			},
+			expected: 8,
+		},
+		{
+			name: "VM without CPU spec",
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Domain: kubevirtv1.DomainSpec{},
+							},
+						},
+					},
+				}
+				mockClient.AddVM(vm)
 			},
 			expected: 1, // Default fallback
 		},
@@ -2152,17 +1714,20 @@ func TestGetVMCPU(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Create mock VM object
-			vm := &unstructured.Unstructured{}
-			vm.SetUnstructuredContent(tc.vmSpec)
+			// Create mock clients
+			mockDynamicClient := NewMockDynamicClient()
+			fakeK8sClient := fake.NewSimpleClientset()
 
-			// Simulate the CPU extraction logic
-			var result int
-			cpuCores, found, err := unstructured.NestedInt64(vm.Object, "spec", "template", "spec", "domain", "cpu", "cores")
-			if err != nil || !found {
-				result = 1 // Default fallback
-			} else {
-				result = int(cpuCores)
+			// Setup test data
+			tc.setupVM(mockDynamicClient)
+
+			// Create client with mock clients
+			client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, nil)
+
+			// Call the actual GetVMCPU function
+			result, err := client.GetVMCPU("test-namespace", "test-vm")
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
 			}
 
 			if result != tc.expected {
@@ -2174,510 +1739,317 @@ func TestGetVMCPU(t *testing.T) {
 
 // TestGetVMStorageDetails tests the GetVMStorageDetails function
 func TestGetVMStorageDetails(t *testing.T) {
-	// Test cases for storage details
 	testCases := []struct {
-		name     string
-		vmSpec   map[string]interface{}
-		expected map[string]interface{}
+		name                string
+		setupVM             func(mockClient *MockDynamicClient)
+		expectedTotalGB     float64
+		expectedVolumeCount int
+		expectedVolumes     []string // volume names
 	}{
 		{
 			name: "VM with DataVolume templates",
-			vmSpec: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"dataVolumeTemplates": []interface{}{
-						map[string]interface{}{
-							"metadata": map[string]interface{}{
-								"name": "disk1",
-							},
-							"spec": map[string]interface{}{
-								"storage": map[string]interface{}{
-									"resources": map[string]interface{}{
-										"requests": map[string]interface{}{
-											"storage": "120Gi",
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						DataVolumeTemplates: []kubevirtv1.DataVolumeTemplateSpec{
+							{
+								ObjectMeta: metav1.ObjectMeta{Name: "disk1"},
+								Spec: cdiv1beta1.DataVolumeSpec{
+									Storage: &cdiv1beta1.StorageSpec{
+										Resources: corev1.VolumeResourceRequirements{
+											Requests: corev1.ResourceList{
+												"storage": resource.MustParse("120Gi"),
+											},
 										},
 									},
 								},
 							},
-						},
-						map[string]interface{}{
-							"metadata": map[string]interface{}{
-								"name": "disk2",
-							},
-							"spec": map[string]interface{}{
-								"storage": map[string]interface{}{
-									"resources": map[string]interface{}{
-										"requests": map[string]interface{}{
-											"storage": "80Gi",
+							{
+								ObjectMeta: metav1.ObjectMeta{Name: "disk2"},
+								Spec: cdiv1beta1.DataVolumeSpec{
+									Storage: &cdiv1beta1.StorageSpec{
+										Resources: corev1.VolumeResourceRequirements{
+											Requests: corev1.ResourceList{
+												"storage": resource.MustParse("80Gi"),
+											},
 										},
 									},
 								},
 							},
 						},
 					},
-				},
+				}
+				mockClient.AddVM(vm)
 			},
-			expected: map[string]interface{}{
-				"totalCapacityGB": 200.0, // 120 + 80
-				"volumeCount":     2,
-			},
+			expectedTotalGB:     200.0, // 120 + 80
+			expectedVolumeCount: 2,
+			expectedVolumes:     []string{"disk1", "disk2"},
 		},
 		{
 			name: "VM without DataVolume templates",
-			vmSpec: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"dataVolumeTemplates": []interface{}{},
-				},
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						DataVolumeTemplates: []kubevirtv1.DataVolumeTemplateSpec{},
+					},
+				}
+				mockClient.AddVM(vm)
 			},
-			expected: map[string]interface{}{
-				"totalCapacityGB": 0.0,
-				"volumeCount":     0,
+			expectedTotalGB:     0.0,
+			expectedVolumeCount: 0,
+			expectedVolumes:     nil,
+		},
+		{
+			name: "VM with single DataVolume template in Mi",
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						DataVolumeTemplates: []kubevirtv1.DataVolumeTemplateSpec{
+							{
+								ObjectMeta: metav1.ObjectMeta{Name: "disk1"},
+								Spec: cdiv1beta1.DataVolumeSpec{
+									Storage: &cdiv1beta1.StorageSpec{
+										Resources: corev1.VolumeResourceRequirements{
+											Requests: corev1.ResourceList{
+												"storage": resource.MustParse("2048Mi"),
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				}
+				mockClient.AddVM(vm)
 			},
+			expectedTotalGB:     2.0, // 2048Mi / 1024 = 2GB
+			expectedVolumeCount: 1,
+			expectedVolumes:     []string{"disk1"},
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Create mock VM object
-			vm := &unstructured.Unstructured{}
-			vm.SetUnstructuredContent(tc.vmSpec)
+			// Create mock clients
+			mockDynamicClient := NewMockDynamicClient()
+			fakeK8sClient := fake.NewSimpleClientset()
 
-			// Simulate the storage details extraction logic
-			totalCapacity := 0.0
-			volumeCount := 0
+			// Setup test data
+			tc.setupVM(mockDynamicClient)
 
-			dataVolumeTemplates, found, err := unstructured.NestedSlice(vm.Object, "spec", "dataVolumeTemplates")
-			if err == nil && found {
-				for _, dv := range dataVolumeTemplates {
-					if dvMap, ok := dv.(map[string]interface{}); ok {
-						volumeCount++
-						if spec, found := dvMap["spec"].(map[string]interface{}); found {
-							if storage, found := spec["storage"].(map[string]interface{}); found {
-								if resources, found := storage["resources"].(map[string]interface{}); found {
-									if requests, found := resources["requests"].(map[string]interface{}); found {
-										if storageStr, found := requests["storage"].(string); found {
-											if strings.HasSuffix(storageStr, "Gi") {
-												capacityStr := strings.TrimSuffix(storageStr, "Gi")
-												if capacityGB, err := strconv.ParseFloat(capacityStr, 64); err == nil {
-													totalCapacity += capacityGB
-												}
-											}
-										}
-									}
-								}
-							}
-						}
+			// Create client with mock clients
+			client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, nil)
+
+			// Call the actual GetVMStorageDetails function
+			storageInfo, err := client.GetVMStorageDetails("test-namespace", "test-vm")
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			// Verify total capacity
+			totalCapacity, ok := storageInfo["totalCapacityGB"].(float64)
+			if !ok {
+				t.Fatal("totalCapacityGB not found or not a float64")
+			}
+			if totalCapacity != tc.expectedTotalGB {
+				t.Errorf("Expected total capacity %.1f GB, got %.1f GB", tc.expectedTotalGB, totalCapacity)
+			}
+
+			// Verify volume count
+			volumes, ok := storageInfo["volumes"].([]map[string]interface{})
+			if !ok {
+				t.Fatal("volumes not found or not a slice")
+			}
+			if len(volumes) != tc.expectedVolumeCount {
+				t.Errorf("Expected %d volumes, got %d", tc.expectedVolumeCount, len(volumes))
+			}
+
+			// Verify volume names
+			for i, expectedName := range tc.expectedVolumes {
+				if i < len(volumes) {
+					actualName, _ := volumes[i]["name"].(string)
+					if actualName != expectedName {
+						t.Errorf("Expected volume[%d] name '%s', got '%s'", i, expectedName, actualName)
 					}
 				}
 			}
-
-			if totalCapacity != tc.expected["totalCapacityGB"] {
-				t.Errorf("Expected total capacity %.1f GB, got %.1f GB", tc.expected["totalCapacityGB"], totalCapacity)
-			}
-			if volumeCount != tc.expected["volumeCount"] {
-				t.Errorf("Expected %d volumes, got %d", tc.expected["volumeCount"], volumeCount)
-			}
 		})
-	}
-}
-
-// TestTestConnection tests the TestConnection function
-func TestTestConnection(t *testing.T) {
-	// Create a client with invalid config to test error handling
-	client := &Client{
-		timeout: 30 * time.Second,
-		// No kubernetesClient set, so this should fail
-	}
-
-	// Test that TestConnection panics when no client is available
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected panic when no kubernetes client is available")
-		}
-	}()
-	client.TestConnection()
-}
-
-// TestGetNamespaceInfo tests the GetNamespaceInfo function
-func TestGetNamespaceInfo(t *testing.T) {
-	// Create a client with invalid config to test error handling
-	client := &Client{
-		timeout: 30 * time.Second,
-		// No kubernetesClient set, so this should fail
-	}
-
-	// Test that GetNamespaceInfo panics when no client is available
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected panic when no kubernetes client is available")
-		}
-	}()
-	client.GetNamespaceInfo("test-namespace")
-}
-
-// TestGetVMMemoryReal tests the GetVMMemory function with real client calls
-func TestGetVMMemoryReal(t *testing.T) {
-	// Create a client with invalid config to test error handling
-	client := &Client{
-		timeout: 30 * time.Second,
-		// No dynamicClient set, so this should return error
-	}
-
-	// Test that GetVMMemory returns error when no client is available
-	memory, err := client.GetVMMemory("test-namespace", "test-vm")
-	if err != nil {
-		t.Errorf("Expected no error, got: %v", err)
-	}
-	if memory != 2.0 {
-		t.Errorf("Expected default memory 2.0, got: %f", memory)
-	}
-}
-
-// TestGetVMCPUReal tests the GetVMCPU function with real client calls
-func TestGetVMCPUReal(t *testing.T) {
-	// Create a client with invalid config to test error handling
-	client := &Client{
-		timeout: 30 * time.Second,
-		// No dynamicClient set, so this should return error
-	}
-
-	// Test that GetVMCPU returns default value when no client is available
-	cpu, err := client.GetVMCPU("test-namespace", "test-vm")
-	if err != nil {
-		t.Errorf("Expected no error, got: %v", err)
-	}
-	if cpu != 1 {
-		t.Errorf("Expected default CPU 1, got: %d", cpu)
-	}
-}
-
-// TestGetVMStorageDetailsReal tests the GetVMStorageDetails function with real client calls
-func TestGetVMStorageDetailsReal(t *testing.T) {
-	// Create a client with invalid config to test error handling
-	client := &Client{
-		timeout: 30 * time.Second,
-		// No dynamicClient set, so this should return error
-	}
-
-	// Test that GetVMStorageDetails returns error when no client is available
-	storage, err := client.GetVMStorageDetails("test-namespace", "test-vm")
-	if err == nil {
-		t.Error("Expected error when no kubernetes client is available")
-	}
-	if storage != nil {
-		t.Error("Expected nil storage when no kubernetes client is available")
-	}
-}
-
-// TestGetVMPowerStateReal tests the GetVMPowerState function with real client calls
-func TestGetVMPowerStateReal(t *testing.T) {
-	// Create a client with invalid config to test error handling
-	client := &Client{
-		timeout: 30 * time.Second,
-		// No dynamicClient set, so this should return error
-	}
-
-	// Test that GetVMPowerState returns error when no client is available
-	state, err := client.GetVMPowerState("test-namespace", "test-vm")
-	if err == nil {
-		t.Error("Expected error when no kubernetes client is available")
-	}
-	if state != "Unknown" {
-		t.Errorf("Expected 'Unknown' state, got: %s", state)
-	}
-}
-
-// TestSetVMPowerStateReal tests the SetVMPowerState function with real client calls
-func TestSetVMPowerStateReal(t *testing.T) {
-	// Create a client with invalid config to test error handling
-	client := &Client{
-		timeout: 30 * time.Second,
-		// No dynamicClient set, so this should return error
-	}
-
-	// Test that SetVMPowerState returns error when no client is available
-	err := client.SetVMPowerState("test-namespace", "test-vm", "On")
-	if err == nil {
-		t.Error("Expected error when no kubernetes client is available")
-	}
-
-	// Verify the error message indicates the client is not initialized
-	if !strings.Contains(err.Error(), "dynamic client is not initialized") {
-		t.Errorf("Expected error to contain 'dynamic client is not initialized', got: %v", err)
-	}
-}
-
-// TestGetVMNetworkInterfacesReal tests the GetVMNetworkInterfaces function with real client calls
-func TestGetVMNetworkInterfacesReal(t *testing.T) {
-	// Create a client with invalid config to test error handling
-	client := &Client{
-		timeout: 30 * time.Second,
-		// No dynamicClient set, so this should return error
-	}
-
-	// Test that GetVMNetworkInterfaces returns error when no client is available
-	interfaces, err := client.GetVMNetworkInterfaces("test-namespace", "test-vm")
-	if err == nil {
-		t.Error("Expected error when no kubernetes client is available")
-	}
-	if interfaces != nil {
-		t.Error("Expected nil interfaces when no kubernetes client is available")
-	}
-}
-
-// TestGetVMStorageReal tests the GetVMStorage function with real client calls
-func TestGetVMStorageReal(t *testing.T) {
-	// Create a client with invalid config to test error handling
-	client := &Client{
-		timeout: 30 * time.Second,
-		// No dynamicClient set, so this should return error
-	}
-
-	// Test that GetVMStorage returns error when no client is available
-	storage, err := client.GetVMStorage("test-namespace", "test-vm")
-	if err == nil {
-		t.Error("Expected error when no kubernetes client is available")
-	}
-	if storage != nil {
-		t.Error("Expected nil storage when no kubernetes client is available")
-	}
-}
-
-// TestGetVMBootOptionsReal tests the GetVMBootOptions function with real client calls
-func TestGetVMBootOptionsReal(t *testing.T) {
-	// Create a client with invalid config to test error handling
-	client := &Client{
-		timeout: 30 * time.Second,
-		// No dynamicClient set, so this should return error
-	}
-
-	// Test that GetVMBootOptions returns error when no client is available
-	options, err := client.GetVMBootOptions("test-namespace", "test-vm")
-	if err == nil {
-		t.Error("Expected error when no kubernetes client is available")
-	}
-	if options != nil {
-		t.Error("Expected nil options when no kubernetes client is available")
-	}
-}
-
-// TestSetVMBootOptionsReal tests the SetVMBootOptions function with real client calls
-func TestSetVMBootOptionsReal(t *testing.T) {
-	// Create a client with invalid config to test error handling
-	client := &Client{
-		timeout: 30 * time.Second,
-		// No dynamicClient set, so this should return error
-	}
-
-	// Test that SetVMBootOptions returns error when no client is available
-	err := client.SetVMBootOptions("test-namespace", "test-vm", map[string]interface{}{
-		"BootSourceOverrideEnabled": "Once",
-		"BootSourceOverrideTarget":  "Pxe",
-	})
-	if err == nil {
-		t.Error("Expected error when no kubernetes client is available")
-	}
-}
-
-// TestGetVMVirtualMediaReal tests the GetVMVirtualMedia function with real client calls
-func TestGetVMVirtualMediaReal(t *testing.T) {
-	// Create a client with invalid config to test error handling
-	client := &Client{
-		timeout: 30 * time.Second,
-		// No dynamicClient set, so this should return error
-	}
-
-	// Test that GetVMVirtualMedia returns error when no client is available
-	media, err := client.GetVMVirtualMedia("test-namespace", "test-vm")
-	if err == nil {
-		t.Error("Expected error when no kubernetes client is available")
-	}
-	if media != nil {
-		t.Error("Expected nil media when no kubernetes client is available")
-	}
-}
-
-// TestIsVirtualMediaInsertedReal tests the IsVirtualMediaInserted function with real client calls
-func TestIsVirtualMediaInsertedReal(t *testing.T) {
-	// Create a client with invalid config to test error handling
-	client := &Client{
-		timeout: 30 * time.Second,
-		// No dynamicClient set, so this should return error
-	}
-
-	// Test that IsVirtualMediaInserted returns error when no client is available
-	inserted, err := client.IsVirtualMediaInserted("test-namespace", "test-vm", "test-media-id")
-	if err == nil {
-		t.Error("Expected error when no kubernetes client is available")
-	}
-	if inserted {
-		t.Error("Expected false when no kubernetes client is available")
-	}
-}
-
-// TestInsertVirtualMediaReal tests the InsertVirtualMedia function with real client calls
-func TestInsertVirtualMediaReal(t *testing.T) {
-	// Create a client with invalid config to test error handling
-	client := &Client{
-		timeout: 30 * time.Second,
-		// No dynamicClient set, so this should return error
-	}
-
-	// Test that InsertVirtualMedia returns error when no client is available
-	err := client.InsertVirtualMedia("test-namespace", "test-vm", "test-media-id", "test-iso-url")
-	if err == nil {
-		t.Error("Expected error when no kubernetes client is available")
-	}
-}
-
-// TestEjectVirtualMediaReal tests the EjectVirtualMedia function with real client calls
-func TestEjectVirtualMediaReal(t *testing.T) {
-	// Create a client with invalid config to test error handling
-	client := &Client{
-		timeout: 30 * time.Second,
-		// No dynamicClient set, so this should return error
-	}
-
-	// Test that EjectVirtualMedia returns error when no client is available
-	err := client.EjectVirtualMedia("test-namespace", "test-vm", "test-media-id")
-	if err == nil {
-		t.Error("Expected error when no kubernetes client is available")
-	}
-}
-
-// TestGetVMNetworkDetailsReal tests the GetVMNetworkDetails function with real client calls
-func TestGetVMNetworkDetailsReal(t *testing.T) {
-	// Create a client with invalid config to test error handling
-	client := &Client{
-		timeout: 30 * time.Second,
-		// No dynamicClient set, so this should return error
-	}
-
-	// Test that GetVMNetworkDetails returns error when no client is available
-	networks, err := client.GetVMNetworkDetails("test-namespace", "test-vm")
-	if err == nil {
-		t.Error("Expected error when no kubernetes client is available")
-	}
-	if networks != nil {
-		t.Error("Expected nil networks when no kubernetes client is available")
 	}
 }
 
 // TestSetBootOrderLogic tests the SetBootOrder function logic in isolation
 func TestSetBootOrderLogic(t *testing.T) {
+	// Helper to create a typed VM for testing
+	createTestVM := func(disks []kubevirtv1.Disk, volumes []kubevirtv1.Volume) *kubevirtv1.VirtualMachine {
+		return &kubevirtv1.VirtualMachine{
+			Spec: kubevirtv1.VirtualMachineSpec{
+				Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+					Spec: kubevirtv1.VirtualMachineInstanceSpec{
+						Domain: kubevirtv1.DomainSpec{
+							Devices: kubevirtv1.Devices{
+								Disks: disks,
+							},
+						},
+						Volumes: volumes,
+					},
+				},
+			},
+		}
+	}
+
 	// Test cases for boot order logic
 	testCases := []struct {
 		name       string
 		bootTarget string
-		vmSpec     map[string]interface{}
-		expected   map[string]interface{}
+		disks      []kubevirtv1.Disk
+		volumes    []kubevirtv1.Volume
+		expected   map[string]*uint // disk name -> expected boot order (nil means no boot order)
 	}{
 		{
 			name:       "Set CD-ROM as first boot device",
 			bootTarget: "Cd",
-			vmSpec: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"template": map[string]interface{}{
-						"spec": map[string]interface{}{
-							"domain": map[string]interface{}{
-								"devices": map[string]interface{}{
-									"disks": []interface{}{
-										map[string]interface{}{
-											"name": "cdrom0",
-										},
-										map[string]interface{}{
-											"name": "disk1",
-										},
-									},
-								},
-							},
-						},
-					},
-				},
+			disks: []kubevirtv1.Disk{
+				{Name: "cdrom0"},
+				{Name: "disk1"},
 			},
-			expected: map[string]interface{}{
-				"cdrom0": int64(1),
-				"disk1":  int64(2),
+			volumes: []kubevirtv1.Volume{
+				{Name: "cdrom0"},
+				{Name: "disk1", VolumeSource: kubevirtv1.VolumeSource{DataVolume: &kubevirtv1.DataVolumeSource{}}},
+			},
+			expected: map[string]*uint{
+				"cdrom0": uintPtr(1),
+				"disk1":  uintPtr(2),
+			},
+		},
+		{
+			name:       "Set CD-ROM as first boot device when boot 1 taken",
+			bootTarget: "Cd",
+			disks: []kubevirtv1.Disk{
+				{Name: "cdrom0"},
+				{Name: "disk1", BootOrder: uintPtr(1)},
+			},
+			volumes: []kubevirtv1.Volume{
+				{Name: "cdrom0"},
+				{Name: "disk1", VolumeSource: kubevirtv1.VolumeSource{DataVolume: &kubevirtv1.DataVolumeSource{}}},
+			},
+			expected: map[string]*uint{
+				"cdrom0": uintPtr(1),
+				"disk1":  uintPtr(2),
+			},
+		},
+		{
+			name:       "Set CD-ROM as first boot device, ignore cloudInit",
+			bootTarget: "Cd",
+			disks: []kubevirtv1.Disk{
+				{Name: "cdrom0"},
+				{Name: "disk1"},
+				{Name: "cloudinitdisk"},
+			},
+			volumes: []kubevirtv1.Volume{
+				{Name: "cdrom0"},
+				{Name: "disk1", VolumeSource: kubevirtv1.VolumeSource{DataVolume: &kubevirtv1.DataVolumeSource{}}},
+				{Name: "cloudinitdisk", VolumeSource: kubevirtv1.VolumeSource{CloudInitNoCloud: &kubevirtv1.CloudInitNoCloudSource{}}},
+			},
+			expected: map[string]*uint{
+				"cdrom0":        uintPtr(1),
+				"disk1":         uintPtr(2),
+				"cloudinitdisk": nil,
 			},
 		},
 		{
 			name:       "Set disk as first boot device",
 			bootTarget: "Hdd",
-			vmSpec: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"template": map[string]interface{}{
-						"spec": map[string]interface{}{
-							"domain": map[string]interface{}{
-								"devices": map[string]interface{}{
-									"disks": []interface{}{
-										map[string]interface{}{
-											"name": "cdrom0",
-										},
-										map[string]interface{}{
-											"name": "disk1",
-										},
-									},
-								},
-							},
-						},
-					},
-				},
+			disks: []kubevirtv1.Disk{
+				{Name: "cdrom0"},
+				{Name: "disk1"},
 			},
-			expected: map[string]interface{}{
+			volumes: []kubevirtv1.Volume{
+				{Name: "cdrom0"},
+				{Name: "disk1", VolumeSource: kubevirtv1.VolumeSource{DataVolume: &kubevirtv1.DataVolumeSource{}}},
+			},
+			expected: map[string]*uint{
 				"cdrom0": nil,
-				"disk1":  int64(2),
+				"disk1":  uintPtr(1),
+			},
+		},
+		{
+			name:       "Set disk as first boot device ignore cloud init",
+			bootTarget: "Hdd",
+			disks: []kubevirtv1.Disk{
+				{Name: "cdrom0"},
+				{Name: "disk1"},
+				{Name: "cloudinitdisk"},
+			},
+			volumes: []kubevirtv1.Volume{
+				{Name: "cdrom0"},
+				{Name: "disk1", VolumeSource: kubevirtv1.VolumeSource{DataVolume: &kubevirtv1.DataVolumeSource{}}},
+				{Name: "cloudinitdisk", VolumeSource: kubevirtv1.VolumeSource{CloudInitNoCloud: &kubevirtv1.CloudInitNoCloudSource{}}},
+			},
+			expected: map[string]*uint{
+				"cdrom0":        nil,
+				"disk1":         uintPtr(1),
+				"cloudinitdisk": nil,
 			},
 		},
 	}
 
+	client := Client{}
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Create mock VM object
-			vm := &unstructured.Unstructured{}
-			vm.SetUnstructuredContent(tc.vmSpec)
+			// Create typed VM object
+			vm := createTestVM(tc.disks, tc.volumes)
 
-			// Simulate the boot order logic
-			devices, found, err := unstructured.NestedMap(vm.Object, "spec", "template", "spec", "domain", "devices")
-			if err == nil && found {
-				if disks, found := devices["disks"].([]interface{}); found {
-					for i, disk := range disks {
-						if diskMap, ok := disk.(map[string]interface{}); ok {
-							if diskName, found := diskMap["name"].(string); found {
-								if tc.bootTarget == "Cd" && diskName == "cdrom0" {
-									// Set CD-ROM as first boot device
-									diskMap["bootOrder"] = int64(1)
-								} else if diskName == "disk1" {
-									// Set main disk as second boot device
-									diskMap["bootOrder"] = int64(2)
-								}
-							}
-						}
-						// Update the disk in the slice
-						disks[i] = disk
-					}
-					devices["disks"] = disks
-				}
+			// Call the boot order logic
+			err := client.modifyVmBootOrder(vm, tc.bootTarget)
+			if err != nil {
+				t.Errorf("modifyVmBootOrder failed: %v", err)
+				return
 			}
 
 			// Verify the results
-			if disks, found := devices["disks"].([]interface{}); found {
-				for _, disk := range disks {
-					if diskMap, ok := disk.(map[string]interface{}); ok {
-						if diskName, found := diskMap["name"].(string); found {
-							if expectedOrder, exists := tc.expected[diskName]; exists {
-								if actualOrder, found := diskMap["bootOrder"]; found {
-									if actualOrder != expectedOrder {
-										t.Errorf("Disk %s: expected boot order %v, got %v", diskName, expectedOrder, actualOrder)
-									}
-								} else if expectedOrder != nil {
-									t.Errorf("Disk %s: expected boot order %v, but none was set", diskName, expectedOrder)
-								}
-							}
+			testedDisks := map[string]bool{}
+			for _, disk := range vm.Spec.Template.Spec.Domain.Devices.Disks {
+				testedDisks[disk.Name] = true
+				if expectedOrder, exists := tc.expected[disk.Name]; exists {
+					if expectedOrder == nil {
+						if disk.BootOrder != nil {
+							t.Errorf("Disk %s: expected no boot order, got %d", disk.Name, *disk.BootOrder)
+						}
+					} else {
+						if disk.BootOrder == nil {
+							t.Errorf("Disk %s: expected boot order %d, but none was set", disk.Name, *expectedOrder)
+						} else if *disk.BootOrder != *expectedOrder {
+							t.Errorf("Disk %s: expected boot order %d, got %d", disk.Name, *expectedOrder, *disk.BootOrder)
 						}
 					}
+				}
+			}
+
+			for name := range tc.expected {
+				if _, ok := testedDisks[name]; !ok {
+					t.Errorf("Disk %s boot order was not checked. It was probably missing.", name)
 				}
 			}
 		})
 	}
+}
+
+// uintPtr is a helper to create a pointer to a uint
+func uintPtr(v uint) *uint {
+	return &v
 }
 
 // TestSetBootOnceLogic tests the SetBootOnce function logic in isolation
@@ -2752,598 +2124,6 @@ func TestSetBootOnceLogic(t *testing.T) {
 	}
 }
 
-// TestSetBootOrderReal tests the SetBootOrder function with real client calls
-func TestSetBootOrderReal(t *testing.T) {
-	// Create a client with invalid config to test error handling
-	client := &Client{
-		timeout: 30 * time.Second,
-		// No dynamicClient set, so this should return error
-	}
-
-	// Test that SetBootOrder returns error when no client is available
-	err := client.SetBootOrder("test-namespace", "test-vm", "Cd")
-	if err == nil {
-		t.Error("Expected error when no kubernetes client is available")
-	}
-}
-
-// TestSetBootOnceReal tests the SetBootOnce function with real client calls
-func TestSetBootOnceReal(t *testing.T) {
-	// Create a client with invalid config to test error handling
-	client := &Client{
-		timeout: 30 * time.Second,
-		// No dynamicClient set, so this should return error
-	}
-
-	// Test that SetBootOnce returns error when no client is available
-	err := client.SetBootOnce("test-namespace", "test-vm", "Cd")
-	if err == nil {
-		t.Error("Expected error when no kubernetes client is available")
-	}
-}
-
-// TestSetVMPowerStateForceOffGracePeriod tests that ForceOff operations include terminationGracePeriodSeconds: 0
-func TestSetVMPowerStateForceOffGracePeriod(t *testing.T) {
-	// Test that ForceOff state is valid and includes grace period logic
-	// This test verifies the logic path for ForceOff operations
-
-	// Create a client with nil dynamicClient to test error handling
-	client := &Client{
-		timeout: 30 * time.Second,
-		// No dynamicClient set, so this should return error
-	}
-
-	// Test that ForceOff operation returns error when no client is available
-	err := client.SetVMPowerState("test-namespace", "test-vm", "ForceOff")
-	if err == nil {
-		t.Error("Expected error when no kubernetes client is available for ForceOff")
-	}
-
-	// Verify the error message indicates the client is not initialized
-	if !strings.Contains(err.Error(), "dynamic client is not initialized") {
-		t.Errorf("Expected error to contain 'dynamic client is not initialized', got: %v", err)
-	}
-
-	// Test that ForceOff is recognized as a valid state
-	validStates := []string{"On", "ForceOff", "GracefulShutdown", "ForceRestart", "GracefulRestart", "Pause", "Resume"}
-	found := false
-	for _, state := range validStates {
-		if state == "ForceOff" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("ForceOff should be a valid power state")
-	}
-
-	t.Log("ForceOff grace period test completed - operation properly handles nil client")
-}
-
-// TestSetVMPowerStateForceRestartGracePeriod tests that ForceRestart operations include terminationGracePeriodSeconds: 0
-func TestSetVMPowerStateForceRestartGracePeriod(t *testing.T) {
-	// Test that ForceRestart state is valid and includes grace period logic
-	// This test verifies the logic path for ForceRestart operations
-
-	// Create a client with nil dynamicClient to test error handling
-	client := &Client{
-		timeout: 30 * time.Second,
-		// No dynamicClient set, so this should return error
-	}
-
-	// Test that ForceRestart operation returns error when no client is available
-	err := client.SetVMPowerState("test-namespace", "test-vm", "ForceRestart")
-	if err == nil {
-		t.Error("Expected error when no kubernetes client is available for ForceRestart")
-	}
-
-	// Verify the error message indicates the client is not initialized
-	if !strings.Contains(err.Error(), "dynamic client is not initialized") {
-		t.Errorf("Expected error to contain 'dynamic client is not initialized', got: %v", err)
-	}
-
-	// Test that ForceRestart is recognized as a valid state
-	validStates := []string{"On", "ForceOff", "GracefulShutdown", "ForceRestart", "GracefulRestart", "Pause", "Resume"}
-	found := false
-	for _, state := range validStates {
-		if state == "ForceRestart" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("ForceRestart should be a valid power state")
-	}
-
-	t.Log("ForceRestart grace period test completed - operation properly handles nil client")
-}
-
-// TestGetVMPowerStateCoverage tests various power state scenarios to improve coverage
-func TestGetVMPowerStateCoverage(t *testing.T) {
-	// Test that the function handles different VM states correctly
-	// This test focuses on the logic paths within GetVMPowerState
-
-	// Test case 1: VM with Running status
-	t.Run("VM_Running_Status", func(t *testing.T) {
-		// Create a mock VM object with Running status
-		vmObject := &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"status": map[string]interface{}{
-					"printableStatus": "Running",
-				},
-			},
-		}
-
-		// Test the printableStatus logic
-		if printableStatus, found, _ := unstructured.NestedString(vmObject.Object, "status", "printableStatus"); found {
-			if printableStatus == "Running" {
-				// This simulates the logic path in GetVMPowerState
-				t.Log("VM Running status logic path tested")
-			}
-		}
-	})
-
-	// Test case 2: VM with force-stop annotation
-	t.Run("VM_Force_Stop_Annotation", func(t *testing.T) {
-		vmObject := &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"metadata": map[string]interface{}{
-					"annotations": map[string]interface{}{
-						"kubevirt.io/force-stop": "true",
-					},
-				},
-				"status": map[string]interface{}{
-					"printableStatus": "Stopping",
-				},
-			},
-		}
-
-		// Test the force-stop annotation logic
-		annotations, found, _ := unstructured.NestedStringMap(vmObject.Object, "metadata", "annotations")
-		if found && annotations["kubevirt.io/force-stop"] == "true" {
-			printableStatus, found, _ := unstructured.NestedString(vmObject.Object, "status", "printableStatus")
-			if found && (printableStatus == "Stopping" || printableStatus == "Terminating") {
-				t.Log("VM Force stop annotation logic path tested")
-			}
-		}
-	})
-
-	// Test case 3: VM with PodTerminating condition
-	t.Run("VM_PodTerminating_Condition", func(t *testing.T) {
-		vmObject := &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"status": map[string]interface{}{
-					"conditions": []interface{}{
-						map[string]interface{}{
-							"type": "PodTerminating",
-						},
-					},
-				},
-			},
-		}
-
-		// Test the PodTerminating condition logic
-		conditions, found, _ := unstructured.NestedSlice(vmObject.Object, "status", "conditions")
-		if found {
-			for _, cond := range conditions {
-				if condMap, ok := cond.(map[string]interface{}); ok {
-					typeStr, _ := condMap["type"].(string)
-					if typeStr == "PodTerminating" {
-						t.Log("VM PodTerminating condition logic path tested")
-						break
-					}
-				}
-			}
-		}
-	})
-
-	// Test case 4: VM with state change requests
-	t.Run("VM_State_Change_Requests", func(t *testing.T) {
-		vmObject := &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"status": map[string]interface{}{
-					"stateChangeRequests": []interface{}{
-						map[string]interface{}{
-							"action": "Start",
-						},
-					},
-				},
-			},
-		}
-
-		// Test the state change requests logic
-		stateChangeRequests, found, _ := unstructured.NestedSlice(vmObject.Object, "status", "stateChangeRequests")
-		if found && len(stateChangeRequests) > 0 {
-			t.Log("VM State change requests logic path tested")
-		}
-	})
-
-	// Test case 5: VMI with Paused condition
-	t.Run("VMI_Paused_Condition", func(t *testing.T) {
-		vmiObject := &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"status": map[string]interface{}{
-					"conditions": []interface{}{
-						map[string]interface{}{
-							"type":   "Paused",
-							"status": "True",
-						},
-					},
-				},
-			},
-		}
-
-		// Test the VMI Paused condition logic
-		vmiConditions, found, _ := unstructured.NestedSlice(vmiObject.Object, "status", "conditions")
-		if found {
-			for _, cond := range vmiConditions {
-				if condMap, ok := cond.(map[string]interface{}); ok {
-					typeStr, _ := condMap["type"].(string)
-					statusStr, _ := condMap["status"].(string)
-					if typeStr == "Paused" && statusStr == "True" {
-						t.Log("VMI Paused condition logic path tested")
-						break
-					}
-				}
-			}
-		}
-	})
-
-	// Test case 6: VMI phase logic
-	t.Run("VMI_Phase_Logic", func(t *testing.T) {
-		testPhases := []string{"Running", "Succeeded", "Failed", "Pending"}
-
-		for _, phase := range testPhases {
-			vmiObject := &unstructured.Unstructured{
-				Object: map[string]interface{}{
-					"status": map[string]interface{}{
-						"phase": phase,
-					},
-				},
-			}
-
-			// Test the VMI phase logic
-			phase, found, _ := unstructured.NestedString(vmiObject.Object, "status", "phase")
-			if found {
-				switch phase {
-				case "Running", "Succeeded":
-					t.Logf("VMI phase '%s' logic path tested", phase)
-				case "Failed":
-					t.Logf("VMI phase '%s' logic path tested", phase)
-				case "Pending":
-					t.Logf("VMI phase '%s' logic path tested", phase)
-				}
-			}
-		}
-	})
-}
-
-// TestSetVMPowerStateCoverage tests various power state change scenarios to improve coverage
-func TestSetVMPowerStateCoverage(t *testing.T) {
-	// Test that the function handles different power state changes correctly
-	// This test focuses on the logic paths within SetVMPowerState
-
-	// Test case 1: Valid power states
-	t.Run("Valid_Power_States", func(t *testing.T) {
-		validStates := []string{"On", "ForceOff", "GracefulShutdown", "ForceRestart", "GracefulRestart", "Pause", "Resume"}
-
-		for _, state := range validStates {
-			// Test that each state is recognized as valid
-			switch state {
-			case "On":
-				t.Log("Power state 'On' logic path tested")
-			case "ForceOff":
-				t.Log("Power state 'ForceOff' logic path tested")
-			case "GracefulShutdown":
-				t.Log("Power state 'GracefulShutdown' logic path tested")
-			case "ForceRestart":
-				t.Log("Power state 'ForceRestart' logic path tested")
-			case "GracefulRestart":
-				t.Log("Power state 'GracefulRestart' logic path tested")
-			case "Pause":
-				t.Log("Power state 'Pause' logic path tested")
-			case "Resume":
-				t.Log("Power state 'Resume' logic path tested")
-			}
-		}
-	})
-
-	// Test case 2: JSON Patch operations for different states
-	t.Run("JSON_Patch_Operations", func(t *testing.T) {
-		// Test On state patch
-		onPatch := []byte(`[{"op": "replace", "path": "/spec/runStrategy", "value": "Always"}]`)
-		if len(onPatch) > 0 {
-			t.Log("On state JSON patch operation tested")
-		}
-
-		// Test ForceOff state patch
-		forceOffPatch := []byte(`[
-			{"op": "replace", "path": "/spec/runStrategy", "value": "Halted"},
-			{"op": "add", "path": "/metadata/annotations/kubevirt.io~1force-stop", "value": "true"},
-			{"op": "replace", "path": "/spec/terminationGracePeriodSeconds", "value": 0}
-		]`)
-		if len(forceOffPatch) > 0 {
-			t.Log("ForceOff state JSON patch operation tested")
-		}
-
-		// Test GracefulShutdown state patch
-		gracefulPatch := []byte(`[{"op": "replace", "path": "/spec/runStrategy", "value": "Halted"}]`)
-		if len(gracefulPatch) > 0 {
-			t.Log("GracefulShutdown state JSON patch operation tested")
-		}
-
-		// Test ForceRestart stop patch
-		forceRestartStopPatch := []byte(`[
-			{"op": "replace", "path": "/spec/runStrategy", "value": "Halted"},
-			{"op": "add", "path": "/metadata/annotations/kubevirt.io~1force-stop", "value": "true"},
-			{"op": "replace", "path": "/spec/terminationGracePeriodSeconds", "value": 0}
-		]`)
-		if len(forceRestartStopPatch) > 0 {
-			t.Log("ForceRestart stop JSON patch operation tested")
-		}
-
-		// Test ForceRestart start patch
-		forceRestartStartPatch := []byte(`[{"op": "replace", "path": "/spec/runStrategy", "value": "Always"}]`)
-		if len(forceRestartStartPatch) > 0 {
-			t.Log("ForceRestart start JSON patch operation tested")
-		}
-	})
-
-	// Test case 3: GVR (GroupVersionResource) setup
-	t.Run("GVR_Setup", func(t *testing.T) {
-		gvr := schema.GroupVersionResource{
-			Group:    "kubevirt.io",
-			Version:  "v1",
-			Resource: "virtualmachines",
-		}
-
-		if gvr.Group == "kubevirt.io" && gvr.Version == "v1" && gvr.Resource == "virtualmachines" {
-			t.Log("GVR setup logic path tested")
-		}
-	})
-
-	// Test case 4: Context and timeout handling
-	t.Run("Context_Timeout_Handling", func(t *testing.T) {
-		timeout := 30 * time.Second
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-
-		// Test that context is created with timeout
-		if ctx != nil {
-			t.Log("Context and timeout handling logic path tested")
-		}
-	})
-
-	// Test case 5: Correlation ID handling
-	t.Run("Correlation_ID_Handling", func(t *testing.T) {
-		// Simulate correlation ID extraction from context
-		correlationID := logger.GetCorrelationID(context.Background())
-
-		// Test that correlation ID is handled (even if empty)
-		if correlationID != "" || correlationID == "" {
-			t.Log("Correlation ID handling logic path tested")
-		}
-	})
-
-	// Test case 6: Error handling patterns
-	t.Run("Error_Handling_Patterns", func(t *testing.T) {
-		// Test error wrapping patterns used in SetVMPowerState
-		testErrors := []string{
-			"failed to start VM test-vm: connection refused",
-			"failed to force stop VM test-vm: not found",
-			"failed to gracefully stop VM test-vm: timeout",
-			"failed to force restart VM test-vm: permission denied",
-		}
-
-		for _, errMsg := range testErrors {
-			if strings.Contains(errMsg, "failed to") && strings.Contains(errMsg, "VM") {
-				t.Log("Error handling pattern tested")
-			}
-		}
-	})
-
-	// Test case 7: Logging patterns
-	t.Run("Logging_Patterns", func(t *testing.T) {
-		// Test the logging patterns used in SetVMPowerState
-		logFields := map[string]interface{}{
-			"operation":    "set_vm_power_state",
-			"namespace":    "test-namespace",
-			"resource":     "test-vm",
-			"target_state": "On",
-			"timeout":      "30s",
-		}
-
-		if len(logFields) > 0 {
-			t.Log("Logging patterns logic path tested")
-		}
-	})
-}
-
-// TestGetVMNetworkInterfacesCoverage tests network interface extraction scenarios to improve coverage
-func TestGetVMNetworkInterfacesCoverage(t *testing.T) {
-	// Test that the function handles different network interface scenarios correctly
-	// This test focuses on the logic paths within GetVMNetworkInterfaces
-
-	// Test case 1: VMI with network interfaces
-	t.Run("VMI_With_Network_Interfaces", func(t *testing.T) {
-		vmiObject := &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"status": map[string]interface{}{
-					"interfaces": []interface{}{
-						map[string]interface{}{
-							"name": "eth0",
-						},
-						map[string]interface{}{
-							"name": "eth1",
-						},
-					},
-				},
-			},
-		}
-
-		// Test the network interface extraction logic
-		networkInterfaces, found, err := unstructured.NestedSlice(vmiObject.Object, "status", "interfaces")
-		if err == nil && found {
-			var interfaces []string
-			for _, iface := range networkInterfaces {
-				if ifaceMap, ok := iface.(map[string]interface{}); ok {
-					if name, found := ifaceMap["name"].(string); found && name != "" {
-						interfaces = append(interfaces, name)
-					}
-				}
-			}
-
-			if len(interfaces) == 2 && interfaces[0] == "eth0" && interfaces[1] == "eth1" {
-				t.Log("VMI with network interfaces logic path tested")
-			}
-		}
-	})
-
-	// Test case 2: VMI with no network interfaces
-	t.Run("VMI_With_No_Network_Interfaces", func(t *testing.T) {
-		vmiObject := &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"status": map[string]interface{}{
-					// No interfaces field
-				},
-			},
-		}
-
-		// Test the case where no interfaces are found
-		networkInterfaces, found, err := unstructured.NestedSlice(vmiObject.Object, "status", "interfaces")
-		if err == nil && !found {
-			t.Log("VMI with no network interfaces logic path tested")
-		}
-		_ = networkInterfaces // Use variable to avoid linter warning
-	})
-
-	// Test case 3: VMI with empty network interfaces
-	t.Run("VMI_With_Empty_Network_Interfaces", func(t *testing.T) {
-		vmiObject := &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"status": map[string]interface{}{
-					"interfaces": []interface{}{},
-				},
-			},
-		}
-
-		// Test the case where interfaces array is empty
-		networkInterfaces, found, err := unstructured.NestedSlice(vmiObject.Object, "status", "interfaces")
-		if err == nil && found && len(networkInterfaces) == 0 {
-			t.Log("VMI with empty network interfaces logic path tested")
-		}
-	})
-
-	// Test case 4: VMI with interface without name
-	t.Run("VMI_With_Interface_Without_Name", func(t *testing.T) {
-		vmiObject := &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"status": map[string]interface{}{
-					"interfaces": []interface{}{
-						map[string]interface{}{
-							// No name field
-							"ip": "192.168.1.1",
-						},
-					},
-				},
-			},
-		}
-
-		// Test the case where interface has no name
-		networkInterfaces, found, err := unstructured.NestedSlice(vmiObject.Object, "status", "interfaces")
-		if err == nil && found {
-			var interfaces []string
-			for _, iface := range networkInterfaces {
-				if ifaceMap, ok := iface.(map[string]interface{}); ok {
-					if name, found := ifaceMap["name"].(string); found && name != "" {
-						interfaces = append(interfaces, name)
-					}
-				}
-			}
-
-			if len(interfaces) == 0 {
-				t.Log("VMI with interface without name logic path tested")
-			}
-		}
-	})
-
-	// Test case 5: VMI with interface with empty name
-	t.Run("VMI_With_Interface_With_Empty_Name", func(t *testing.T) {
-		vmiObject := &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"status": map[string]interface{}{
-					"interfaces": []interface{}{
-						map[string]interface{}{
-							"name": "", // Empty name
-						},
-					},
-				},
-			},
-		}
-
-		// Test the case where interface has empty name
-		networkInterfaces, found, err := unstructured.NestedSlice(vmiObject.Object, "status", "interfaces")
-		if err == nil && found {
-			var interfaces []string
-			for _, iface := range networkInterfaces {
-				if ifaceMap, ok := iface.(map[string]interface{}); ok {
-					if name, found := ifaceMap["name"].(string); found && name != "" {
-						interfaces = append(interfaces, name)
-					}
-				}
-			}
-
-			if len(interfaces) == 0 {
-				t.Log("VMI with interface with empty name logic path tested")
-			}
-		}
-	})
-
-	// Test case 6: GVR setup for VMI
-	t.Run("GVR_Setup_For_VMI", func(t *testing.T) {
-		gvr := schema.GroupVersionResource{
-			Group:    "kubevirt.io",
-			Version:  "v1",
-			Resource: "virtualmachineinstances",
-		}
-
-		if gvr.Group == "kubevirt.io" && gvr.Version == "v1" && gvr.Resource == "virtualmachineinstances" {
-			t.Log("GVR setup for VMI logic path tested")
-		}
-	})
-
-	// Test case 7: Error handling patterns
-	t.Run("Error_Handling_Patterns", func(t *testing.T) {
-		// Test error wrapping patterns used in GetVMNetworkInterfaces
-		testErrors := []string{
-			"failed to get VMI test-vm: not found",
-			"failed to get VMI test-vm: connection refused",
-			"failed to get VMI test-vm: timeout",
-		}
-
-		for _, errMsg := range testErrors {
-			if strings.Contains(errMsg, "failed to get VMI") {
-				t.Log("Error handling pattern tested")
-			}
-		}
-	})
-}
-
-// TestGetVMPowerStateNilClient tests the GetVMPowerState function with nil dynamic client
-func TestGetVMPowerStateNilClient(t *testing.T) {
-	client := &Client{
-		dynamicClient: nil,
-	}
-
-	powerState, err := client.GetVMPowerState("default", "test-vm")
-	if err == nil {
-		t.Error("Expected error when dynamic client is nil")
-	}
-	if powerState != "Unknown" {
-		t.Errorf("Expected power state 'Unknown', got '%s'", powerState)
-	}
-}
-
 // TestSanitizeResourceName tests the sanitizeResourceName function
 func TestSanitizeResourceName(t *testing.T) {
 	testCases := []struct {
@@ -3395,5 +2175,2562 @@ func TestSanitizeResourceName(t *testing.T) {
 				t.Errorf("Result length %d is longer than input length %d", len(result), len(tc.input))
 			}
 		})
+	}
+}
+
+// =============================================================================
+// BOOT ONCE TESTS
+// =============================================================================
+
+// TestCaptureCurrentBootOrder tests the captureCurrentBootOrder function
+func TestCaptureCurrentBootOrder(t *testing.T) {
+	testCases := []struct {
+		name        string
+		setupVM     func() *kubevirtv1.VirtualMachine
+		expectEmpty bool
+		expectDisks int
+	}{
+		{
+			name: "VM with boot orders set",
+			setupVM: func() *kubevirtv1.VirtualMachine {
+				bootOrder1 := uint(1)
+				bootOrder2 := uint(2)
+				return &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Domain: kubevirtv1.DomainSpec{
+									Devices: kubevirtv1.Devices{
+										Disks: []kubevirtv1.Disk{
+											{Name: "disk0", BootOrder: &bootOrder1},
+											{Name: "disk1", BootOrder: &bootOrder2},
+										},
+									},
+								},
+							},
+						},
+					},
+				}
+			},
+			expectEmpty: false,
+			expectDisks: 2,
+		},
+		{
+			name: "VM with no boot orders",
+			setupVM: func() *kubevirtv1.VirtualMachine {
+				return &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Domain: kubevirtv1.DomainSpec{
+									Devices: kubevirtv1.Devices{
+										Disks: []kubevirtv1.Disk{
+											{Name: "disk0"},
+											{Name: "disk1"},
+										},
+									},
+								},
+							},
+						},
+					},
+				}
+			},
+			expectEmpty: false,
+			expectDisks: 2,
+		},
+		{
+			name: "VM with no template",
+			setupVM: func() *kubevirtv1.VirtualMachine {
+				return &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{},
+				}
+			},
+			expectEmpty: true,
+			expectDisks: 0,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &Client{timeout: 30 * time.Second}
+			vm := tc.setupVM()
+
+			configJSON, err := client.captureCurrentBootOrder(vm)
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			if tc.expectEmpty {
+				if configJSON != "[]" {
+					t.Errorf("Expected empty JSON array, got: %s", configJSON)
+				}
+			} else {
+				if !strings.Contains(configJSON, "disk0") {
+					t.Errorf("Expected config to contain disk0, got: %s", configJSON)
+				}
+			}
+		})
+	}
+}
+
+// TestRestoreBootOrder tests the restoreBootOrder function
+func TestRestoreBootOrder(t *testing.T) {
+	testCases := []struct {
+		name       string
+		configJSON string
+		setupVM    func() *kubevirtv1.VirtualMachine
+		validate   func(t *testing.T, vm *kubevirtv1.VirtualMachine)
+	}{
+		{
+			name:       "Restore boot orders from JSON",
+			configJSON: `[{"diskName":"disk0","bootOrder":1},{"diskName":"disk1","bootOrder":2}]`,
+			setupVM: func() *kubevirtv1.VirtualMachine {
+				return &kubevirtv1.VirtualMachine{
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Domain: kubevirtv1.DomainSpec{
+									Devices: kubevirtv1.Devices{
+										Disks: []kubevirtv1.Disk{
+											{Name: "disk0"},
+											{Name: "disk1"},
+										},
+									},
+								},
+							},
+						},
+					},
+				}
+			},
+			validate: func(t *testing.T, vm *kubevirtv1.VirtualMachine) {
+				disks := vm.Spec.Template.Spec.Domain.Devices.Disks
+				if disks[0].BootOrder == nil || *disks[0].BootOrder != 1 {
+					t.Errorf("disk0 should have boot order 1")
+				}
+				if disks[1].BootOrder == nil || *disks[1].BootOrder != 2 {
+					t.Errorf("disk1 should have boot order 2")
+				}
+			},
+		},
+		{
+			name:       "Restore with nil boot order",
+			configJSON: `[{"diskName":"disk0","bootOrder":1},{"diskName":"disk1"}]`,
+			setupVM: func() *kubevirtv1.VirtualMachine {
+				bootOrder := uint(99)
+				return &kubevirtv1.VirtualMachine{
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Domain: kubevirtv1.DomainSpec{
+									Devices: kubevirtv1.Devices{
+										Disks: []kubevirtv1.Disk{
+											{Name: "disk0", BootOrder: &bootOrder},
+											{Name: "disk1", BootOrder: &bootOrder},
+										},
+									},
+								},
+							},
+						},
+					},
+				}
+			},
+			validate: func(t *testing.T, vm *kubevirtv1.VirtualMachine) {
+				disks := vm.Spec.Template.Spec.Domain.Devices.Disks
+				if disks[0].BootOrder == nil || *disks[0].BootOrder != 1 {
+					t.Errorf("disk0 should have boot order 1")
+				}
+				if disks[1].BootOrder != nil {
+					t.Errorf("disk1 should have nil boot order, got %d", *disks[1].BootOrder)
+				}
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &Client{timeout: 30 * time.Second}
+			vm := tc.setupVM()
+
+			err := client.restoreBootOrder(vm, tc.configJSON)
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			tc.validate(t, vm)
+		})
+	}
+}
+
+// TestGetVMIUID tests the getVMIUID function
+func TestGetVMIUID(t *testing.T) {
+	testCases := []struct {
+		name        string
+		setupVMI    func(mockClient *MockDynamicClient)
+		expectedUID string
+	}{
+		{
+			name: "VMI exists with UID",
+			setupVMI: func(mockClient *MockDynamicClient) {
+				vmi := &kubevirtv1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+						UID:       "test-uid-12345",
+					},
+					Status: kubevirtv1.VirtualMachineInstanceStatus{
+						Phase: kubevirtv1.Running,
+					},
+				}
+				mockClient.AddVMI(vmi)
+			},
+			expectedUID: "test-uid-12345",
+		},
+		{
+			name:        "VMI does not exist",
+			setupVMI:    func(mockClient *MockDynamicClient) {},
+			expectedUID: "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockDynamicClient := NewMockDynamicClient()
+			fakeK8sClient := fake.NewSimpleClientset()
+
+			tc.setupVMI(mockDynamicClient)
+
+			client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, nil)
+
+			uid := client.getVMIUID("test-namespace", "test-vm")
+			if uid != tc.expectedUID {
+				t.Errorf("Expected UID '%s', got '%s'", tc.expectedUID, uid)
+			}
+		})
+	}
+}
+
+// TestSetBootOnce tests the SetBootOnce function with edge cases
+func TestSetBootOnce(t *testing.T) {
+	testCases := []struct {
+		name       string
+		bootTarget string
+		setupVM    func(mockClient *MockDynamicClient)
+		setupVMI   func(mockClient *MockDynamicClient)
+		validate   func(t *testing.T, mockClient *MockDynamicClient)
+	}{
+		{
+			name:       "Set boot once on VM without existing boot-once state",
+			bootTarget: "Cd",
+			setupVM: func(mockClient *MockDynamicClient) {
+				bootOrder1 := uint(1)
+				bootOrder2 := uint(2)
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Domain: kubevirtv1.DomainSpec{
+									Devices: kubevirtv1.Devices{
+										Disks: []kubevirtv1.Disk{
+											{Name: "disk0", BootOrder: &bootOrder1},
+											{Name: "cdrom0", BootOrder: &bootOrder2, DiskDevice: kubevirtv1.DiskDevice{CDRom: &kubevirtv1.CDRomTarget{}}},
+										},
+									},
+								},
+								Volumes: []kubevirtv1.Volume{
+									{Name: "disk0", VolumeSource: kubevirtv1.VolumeSource{DataVolume: &kubevirtv1.DataVolumeSource{Name: "dv0"}}},
+									{Name: "cdrom0", VolumeSource: kubevirtv1.VolumeSource{DataVolume: &kubevirtv1.DataVolumeSource{Name: "cdrom-dv"}}},
+								},
+							},
+						},
+					},
+				}
+				mockClient.AddVM(vm)
+			},
+			setupVMI: func(mockClient *MockDynamicClient) {
+				vmi := &kubevirtv1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+						UID:       "vmi-uid-1",
+					},
+					Status: kubevirtv1.VirtualMachineInstanceStatus{
+						Phase: kubevirtv1.Running,
+					},
+				}
+				mockClient.AddVMI(vmi)
+			},
+			validate: func(t *testing.T, mockClient *MockDynamicClient) {
+				vm, err := mockClient.GetVM("test-namespace", "test-vm")
+				if err != nil {
+					t.Fatalf("Failed to get VM: %v", err)
+				}
+
+				// Check label
+				labels := vm.GetLabels()
+				if labels[BootOnceLabel] != "enabled" {
+					t.Errorf("Expected boot-once label to be 'enabled', got '%s'", labels[BootOnceLabel])
+				}
+
+				// Check annotations
+				annotations := vm.GetAnnotations()
+				if annotations[BootOnceOriginalConfigAnnotation] == "" {
+					t.Error("Expected original config annotation to be set")
+				}
+				if annotations[BootOnceVMIUIDAnnotation] != "vmi-uid-1" {
+					t.Errorf("Expected VMI UID annotation to be 'vmi-uid-1', got '%s'", annotations[BootOnceVMIUIDAnnotation])
+				}
+				if annotations["redfish.boot.source.override.enabled"] != "Once" {
+					t.Error("Expected redfish override enabled annotation to be 'Once'")
+				}
+				if annotations["redfish.boot.source.override.target"] != "Cd" {
+					t.Error("Expected redfish override target annotation to be 'Cd'")
+				}
+			},
+		},
+		{
+			name:       "Set boot once on VM that is off (no VMI)",
+			bootTarget: "Cd",
+			setupVM: func(mockClient *MockDynamicClient) {
+				bootOrder1 := uint(1)
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Domain: kubevirtv1.DomainSpec{
+									Devices: kubevirtv1.Devices{
+										Disks: []kubevirtv1.Disk{
+											{Name: "disk0", BootOrder: &bootOrder1},
+											{Name: "cdrom0", DiskDevice: kubevirtv1.DiskDevice{CDRom: &kubevirtv1.CDRomTarget{}}},
+										},
+									},
+								},
+								Volumes: []kubevirtv1.Volume{
+									{Name: "disk0", VolumeSource: kubevirtv1.VolumeSource{DataVolume: &kubevirtv1.DataVolumeSource{Name: "dv0"}}},
+									{Name: "cdrom0", VolumeSource: kubevirtv1.VolumeSource{DataVolume: &kubevirtv1.DataVolumeSource{Name: "cdrom-dv"}}},
+								},
+							},
+						},
+					},
+				}
+				mockClient.AddVM(vm)
+			},
+			setupVMI: func(mockClient *MockDynamicClient) {
+				// No VMI - VM is off
+			},
+			validate: func(t *testing.T, mockClient *MockDynamicClient) {
+				vm, err := mockClient.GetVM("test-namespace", "test-vm")
+				if err != nil {
+					t.Fatalf("Failed to get VM: %v", err)
+				}
+
+				// Check VMI UID annotation is empty
+				annotations := vm.GetAnnotations()
+				if annotations[BootOnceVMIUIDAnnotation] != "" {
+					t.Errorf("Expected VMI UID annotation to be empty, got '%s'", annotations[BootOnceVMIUIDAnnotation])
+				}
+
+				// Check label is set
+				labels := vm.GetLabels()
+				if labels[BootOnceLabel] != "enabled" {
+					t.Errorf("Expected boot-once label to be 'enabled', got '%s'", labels[BootOnceLabel])
+				}
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockDynamicClient := NewMockDynamicClient()
+			fakeK8sClient := fake.NewSimpleClientset()
+
+			tc.setupVM(mockDynamicClient)
+			tc.setupVMI(mockDynamicClient)
+
+			client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, nil)
+
+			err := client.SetBootOnce("test-namespace", "test-vm", tc.bootTarget)
+			if err != nil {
+				t.Fatalf("SetBootOnce failed: %v", err)
+			}
+
+			tc.validate(t, mockDynamicClient)
+		})
+	}
+}
+
+// TestHandleVMUpdate tests the handleVMUpdate function
+func TestHandleVMUpdate(t *testing.T) {
+	testCases := []struct {
+		name             string
+		setupVM          func(mockClient *MockDynamicClient)
+		setupVMI         func(mockClient *MockDynamicClient)
+		expectRestore    bool
+		expectClearState bool
+	}{
+		{
+			name: "VMI UID changed - should restore boot order",
+			setupVM: func(mockClient *MockDynamicClient) {
+				bootOrder1 := uint(1)
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+						Labels: map[string]string{
+							BootOnceLabel: "enabled",
+						},
+						Annotations: map[string]string{
+							BootOnceOriginalConfigAnnotation:       `[{"diskName":"disk0","bootOrder":1},{"diskName":"cdrom0","bootOrder":2}]`,
+							BootOnceVMIUIDAnnotation:               "old-vmi-uid",
+							"redfish.boot.source.override.enabled": "Once",
+							"redfish.boot.source.override.target":  "Cd",
+						},
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Domain: kubevirtv1.DomainSpec{
+									Devices: kubevirtv1.Devices{
+										Disks: []kubevirtv1.Disk{
+											{Name: "disk0", BootOrder: &bootOrder1},
+											{Name: "cdrom0"},
+										},
+									},
+								},
+							},
+						},
+					},
+				}
+				mockClient.AddVM(vm)
+			},
+			setupVMI: func(mockClient *MockDynamicClient) {
+				vmi := &kubevirtv1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+						UID:       "new-vmi-uid", // Different from recorded
+					},
+					Status: kubevirtv1.VirtualMachineInstanceStatus{
+						Phase: kubevirtv1.Running,
+					},
+				}
+				mockClient.AddVMI(vmi)
+			},
+			expectRestore:    true,
+			expectClearState: true,
+		},
+		{
+			name: "VMI UID same - should not restore",
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+						Labels: map[string]string{
+							BootOnceLabel: "enabled",
+						},
+						Annotations: map[string]string{
+							BootOnceOriginalConfigAnnotation:       `[{"diskName":"disk0","bootOrder":1}]`,
+							BootOnceVMIUIDAnnotation:               "same-vmi-uid",
+							"redfish.boot.source.override.enabled": "Once",
+						},
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Domain: kubevirtv1.DomainSpec{
+									Devices: kubevirtv1.Devices{
+										Disks: []kubevirtv1.Disk{
+											{Name: "disk0"},
+										},
+									},
+								},
+							},
+						},
+					},
+				}
+				mockClient.AddVM(vm)
+			},
+			setupVMI: func(mockClient *MockDynamicClient) {
+				vmi := &kubevirtv1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+						UID:       "same-vmi-uid", // Same as recorded
+					},
+					Status: kubevirtv1.VirtualMachineInstanceStatus{
+						Phase: kubevirtv1.Running,
+					},
+				}
+				mockClient.AddVMI(vmi)
+			},
+			expectRestore:    false,
+			expectClearState: false,
+		},
+		{
+			name: "VM was off, now has VMI - should restore",
+			setupVM: func(mockClient *MockDynamicClient) {
+				vm := &kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+						Labels: map[string]string{
+							BootOnceLabel: "enabled",
+						},
+						Annotations: map[string]string{
+							BootOnceOriginalConfigAnnotation:       `[{"diskName":"disk0","bootOrder":1}]`,
+							BootOnceVMIUIDAnnotation:               "", // Was off
+							"redfish.boot.source.override.enabled": "Once",
+						},
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+							Spec: kubevirtv1.VirtualMachineInstanceSpec{
+								Domain: kubevirtv1.DomainSpec{
+									Devices: kubevirtv1.Devices{
+										Disks: []kubevirtv1.Disk{
+											{Name: "disk0"},
+										},
+									},
+								},
+							},
+						},
+					},
+				}
+				mockClient.AddVM(vm)
+			},
+			setupVMI: func(mockClient *MockDynamicClient) {
+				vmi := &kubevirtv1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vm",
+						Namespace: "test-namespace",
+						UID:       "new-vmi-uid",
+					},
+					Status: kubevirtv1.VirtualMachineInstanceStatus{
+						Phase: kubevirtv1.Running,
+					},
+				}
+				mockClient.AddVMI(vmi)
+			},
+			expectRestore:    true,
+			expectClearState: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockDynamicClient := NewMockDynamicClient()
+			fakeK8sClient := fake.NewSimpleClientset()
+
+			tc.setupVM(mockDynamicClient)
+			tc.setupVMI(mockDynamicClient)
+
+			client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, nil)
+
+			// Get the VM to pass to handleVMUpdate
+			vm, err := mockDynamicClient.GetVM("test-namespace", "test-vm")
+			if err != nil {
+				t.Fatalf("Failed to get VM: %v", err)
+			}
+
+			// Call handleVMUpdate
+			client.handleVMUpdate(vm)
+
+			// Check the result
+			updatedVM, err := mockDynamicClient.GetVM("test-namespace", "test-vm")
+			if err != nil {
+				t.Fatalf("Failed to get updated VM: %v", err)
+			}
+
+			labels := updatedVM.GetLabels()
+			annotations := updatedVM.GetAnnotations()
+
+			if tc.expectClearState {
+				// Boot-once label should be removed
+				if labels[BootOnceLabel] != "" {
+					t.Errorf("Expected boot-once label to be removed, got '%s'", labels[BootOnceLabel])
+				}
+				// Original config annotation should be removed
+				if annotations[BootOnceOriginalConfigAnnotation] != "" {
+					t.Errorf("Expected original config annotation to be removed")
+				}
+			} else {
+				// Boot-once label should still be present
+				if labels[BootOnceLabel] != "enabled" {
+					t.Errorf("Expected boot-once label to be 'enabled', got '%s'", labels[BootOnceLabel])
+				}
+			}
+		})
+	}
+}
+
+// newTestVM creates a VM with known labels, annotations, and spec for patching tests.
+// Tests can verify that only the expected labels changed and everything else is preserved.
+func newTestVM(namespace, name string, extraLabels, extraAnnotations map[string]string) *kubevirtv1.VirtualMachine {
+	labels := map[string]string{"existing-label": "original-value"}
+	for k, v := range extraLabels {
+		labels[k] = v
+	}
+	annotations := map[string]string{"existing-annotation": "original-value"}
+	for k, v := range extraAnnotations {
+		annotations[k] = v
+	}
+	bootOrder := uint(1)
+	return &kubevirtv1.VirtualMachine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   namespace,
+			Labels:      labels,
+			Annotations: annotations,
+		},
+		Spec: kubevirtv1.VirtualMachineSpec{
+			Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+				Spec: kubevirtv1.VirtualMachineInstanceSpec{
+					Domain: kubevirtv1.DomainSpec{
+						Devices: kubevirtv1.Devices{
+							Disks: []kubevirtv1.Disk{
+								{Name: "disk0", BootOrder: &bootOrder},
+							},
+						},
+					},
+					Volumes: []kubevirtv1.Volume{
+						{Name: "disk0", VolumeSource: kubevirtv1.VolumeSource{DataVolume: &kubevirtv1.DataVolumeSource{Name: "dv0"}}},
+					},
+				},
+			},
+		},
+	}
+}
+
+// assertVMUnchangedExceptLabels compares two VMs and verifies that everything
+// except .metadata.labels is identical.
+func assertVMUnchangedExceptLabels(t *testing.T, before, after *kubevirtv1.VirtualMachine) {
+	t.Helper()
+
+	// Compare annotations
+	if !reflect.DeepEqual(before.GetAnnotations(), after.GetAnnotations()) {
+		t.Errorf("Annotations were modified:\n  before: %v\n  after:  %v", before.GetAnnotations(), after.GetAnnotations())
+	}
+
+	// Compare spec
+	if !reflect.DeepEqual(before.Spec, after.Spec) {
+		t.Errorf("Spec was modified:\n  before: %+v\n  after:  %+v", before.Spec, after.Spec)
+	}
+
+	// Compare status
+	if !reflect.DeepEqual(before.Status, after.Status) {
+		t.Errorf("Status was modified:\n  before: %+v\n  after:  %+v", before.Status, after.Status)
+	}
+
+	// Compare name and namespace
+	if before.Name != after.Name {
+		t.Errorf("Name was modified: %q -> %q", before.Name, after.Name)
+	}
+	if before.Namespace != after.Namespace {
+		t.Errorf("Namespace was modified: %q -> %q", before.Namespace, after.Namespace)
+	}
+}
+
+func TestSetImportingLabel(t *testing.T) {
+	mockDynamicClient := NewMockDynamicClient()
+	fakeK8sClient := fake.NewSimpleClientset()
+	vm := newTestVM("test-ns", "test-vm", nil, nil)
+	mockDynamicClient.AddVM(vm)
+
+	before, _ := mockDynamicClient.GetVM("test-ns", "test-vm")
+
+	client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, nil)
+
+	err := client.setImportingLabel("test-ns", "test-vm", "cdrom0", "copy-iso-pod-123")
+	if err != nil {
+		t.Fatalf("setImportingLabel failed: %v", err)
+	}
+
+	after, err := mockDynamicClient.GetVM("test-ns", "test-vm")
+	if err != nil {
+		t.Fatalf("Failed to get VM: %v", err)
+	}
+
+	labels := after.GetLabels()
+	expectedKey := ImportingLabelPrefix + "cdrom0"
+	if labels[expectedKey] != "copy-iso-pod-123" {
+		t.Errorf("Expected label %s=%q, got %q", expectedKey, "copy-iso-pod-123", labels[expectedKey])
+	}
+	if labels["existing-label"] != "original-value" {
+		t.Errorf("Existing label was modified: got %q", labels["existing-label"])
+	}
+	assertVMUnchangedExceptLabels(t, before, after)
+}
+
+func TestSetImportingLabel_PreservesExistingImportLabels(t *testing.T) {
+	mockDynamicClient := NewMockDynamicClient()
+	fakeK8sClient := fake.NewSimpleClientset()
+	vm := newTestVM("test-ns", "test-vm", map[string]string{
+		ImportingLabelPrefix + "cdrom1": "other-pod",
+	}, nil)
+	mockDynamicClient.AddVM(vm)
+
+	client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, nil)
+
+	err := client.setImportingLabel("test-ns", "test-vm", "cdrom0", "copy-iso-pod-456")
+	if err != nil {
+		t.Fatalf("setImportingLabel failed: %v", err)
+	}
+
+	updated, err := mockDynamicClient.GetVM("test-ns", "test-vm")
+	if err != nil {
+		t.Fatalf("Failed to get VM: %v", err)
+	}
+
+	labels := updated.GetLabels()
+	if labels[ImportingLabelPrefix+"cdrom0"] != "copy-iso-pod-456" {
+		t.Errorf("New importing label not set correctly")
+	}
+	if labels[ImportingLabelPrefix+"cdrom1"] != "other-pod" {
+		t.Errorf("Existing importing label was modified: got %q", labels[ImportingLabelPrefix+"cdrom1"])
+	}
+}
+
+func TestRemoveImportingLabel(t *testing.T) {
+	mockDynamicClient := NewMockDynamicClient()
+	fakeK8sClient := fake.NewSimpleClientset()
+	vm := newTestVM("test-ns", "test-vm", map[string]string{
+		ImportingLabelPrefix + "cdrom0": "copy-iso-pod-123",
+		ImportingLabelPrefix + "cdrom1": "other-pod",
+	}, nil)
+	mockDynamicClient.AddVM(vm)
+
+	before, _ := mockDynamicClient.GetVM("test-ns", "test-vm")
+
+	client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, nil)
+
+	err := client.removeImportingLabel("test-ns", "test-vm", "cdrom0")
+	if err != nil {
+		t.Fatalf("removeImportingLabel failed: %v", err)
+	}
+
+	after, err := mockDynamicClient.GetVM("test-ns", "test-vm")
+	if err != nil {
+		t.Fatalf("Failed to get VM: %v", err)
+	}
+
+	labels := after.GetLabels()
+	if _, exists := labels[ImportingLabelPrefix+"cdrom0"]; exists {
+		t.Errorf("Importing label cdrom0 should have been removed")
+	}
+	if labels[ImportingLabelPrefix+"cdrom1"] != "other-pod" {
+		t.Errorf("Other importing label was modified: got %q", labels[ImportingLabelPrefix+"cdrom1"])
+	}
+	if labels["existing-label"] != "original-value" {
+		t.Errorf("Existing label was modified: got %q", labels["existing-label"])
+	}
+	assertVMUnchangedExceptLabels(t, before, after)
+}
+
+func TestIsImportInProgress(t *testing.T) {
+	testCases := []struct {
+		name     string
+		labels   map[string]string
+		expected bool
+	}{
+		{
+			name:     "no importing labels",
+			labels:   nil,
+			expected: false,
+		},
+		{
+			name:     "one importing label",
+			labels:   map[string]string{ImportingLabelPrefix + "cdrom0": "pod-1"},
+			expected: true,
+		},
+		{
+			name: "multiple importing labels",
+			labels: map[string]string{
+				ImportingLabelPrefix + "cdrom0": "pod-1",
+				ImportingLabelPrefix + "cdrom1": "pod-2",
+			},
+			expected: true,
+		},
+		{
+			name:     "unrelated labels only",
+			labels:   map[string]string{"some-other-label": "value"},
+			expected: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockDynamicClient := NewMockDynamicClient()
+			fakeK8sClient := fake.NewSimpleClientset()
+			vm := newTestVM("test-ns", "test-vm", tc.labels, nil)
+			mockDynamicClient.AddVM(vm)
+
+			client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, nil)
+
+			result, err := client.IsImportInProgress("test-ns", "test-vm")
+			if err != nil {
+				t.Fatalf("IsImportInProgress failed: %v", err)
+			}
+			if result != tc.expected {
+				t.Errorf("IsImportInProgress = %v, want %v", result, tc.expected)
+			}
+		})
+	}
+}
+
+func TestIsImportInProgress_VMNotFound(t *testing.T) {
+	mockDynamicClient := NewMockDynamicClient()
+	fakeK8sClient := fake.NewSimpleClientset()
+	client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, nil)
+
+	_, err := client.IsImportInProgress("test-ns", "nonexistent-vm")
+	if err == nil {
+		t.Error("Expected error for nonexistent VM")
+	}
+}
+
+func TestSetPowerAfterImportLabel(t *testing.T) {
+	mockDynamicClient := NewMockDynamicClient()
+	fakeK8sClient := fake.NewSimpleClientset()
+	vm := newTestVM("test-ns", "test-vm", nil, nil)
+	mockDynamicClient.AddVM(vm)
+
+	before, _ := mockDynamicClient.GetVM("test-ns", "test-vm")
+
+	client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, nil)
+
+	err := client.SetPowerAfterImportLabel("test-ns", "test-vm", "On")
+	if err != nil {
+		t.Fatalf("SetPowerAfterImportLabel failed: %v", err)
+	}
+
+	after, err := mockDynamicClient.GetVM("test-ns", "test-vm")
+	if err != nil {
+		t.Fatalf("Failed to get VM: %v", err)
+	}
+
+	labels := after.GetLabels()
+	if labels[PowerAfterImportLabel] != "On" {
+		t.Errorf("Expected label %s=%q, got %q", PowerAfterImportLabel, "On", labels[PowerAfterImportLabel])
+	}
+	if labels["existing-label"] != "original-value" {
+		t.Errorf("Existing label was modified: got %q", labels["existing-label"])
+	}
+	assertVMUnchangedExceptLabels(t, before, after)
+}
+
+func TestSetPowerAfterImportLabel_OverwritesPrevious(t *testing.T) {
+	mockDynamicClient := NewMockDynamicClient()
+	fakeK8sClient := fake.NewSimpleClientset()
+	vm := newTestVM("test-ns", "test-vm", map[string]string{
+		PowerAfterImportLabel: "On",
+	}, nil)
+	mockDynamicClient.AddVM(vm)
+
+	client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, nil)
+
+	err := client.SetPowerAfterImportLabel("test-ns", "test-vm", "ForceRestart")
+	if err != nil {
+		t.Fatalf("SetPowerAfterImportLabel failed: %v", err)
+	}
+
+	updated, err := mockDynamicClient.GetVM("test-ns", "test-vm")
+	if err != nil {
+		t.Fatalf("Failed to get VM: %v", err)
+	}
+
+	labels := updated.GetLabels()
+	if labels[PowerAfterImportLabel] != "ForceRestart" {
+		t.Errorf("Expected power label to be overwritten to ForceRestart, got %q", labels[PowerAfterImportLabel])
+	}
+}
+
+func TestSetPowerAfterImportLabel_PreservesImportingLabels(t *testing.T) {
+	mockDynamicClient := NewMockDynamicClient()
+	fakeK8sClient := fake.NewSimpleClientset()
+	vm := newTestVM("test-ns", "test-vm", map[string]string{
+		ImportingLabelPrefix + "cdrom0": "pod-1",
+	}, nil)
+	mockDynamicClient.AddVM(vm)
+
+	before, _ := mockDynamicClient.GetVM("test-ns", "test-vm")
+
+	client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, nil)
+
+	err := client.SetPowerAfterImportLabel("test-ns", "test-vm", "On")
+	if err != nil {
+		t.Fatalf("SetPowerAfterImportLabel failed: %v", err)
+	}
+
+	after, err := mockDynamicClient.GetVM("test-ns", "test-vm")
+	if err != nil {
+		t.Fatalf("Failed to get VM: %v", err)
+	}
+
+	labels := after.GetLabels()
+	if labels[PowerAfterImportLabel] != "On" {
+		t.Errorf("Power label not set correctly")
+	}
+	if labels[ImportingLabelPrefix+"cdrom0"] != "pod-1" {
+		t.Errorf("Importing label was modified: got %q", labels[ImportingLabelPrefix+"cdrom0"])
+	}
+	assertVMUnchangedExceptLabels(t, before, after)
+}
+
+func TestSetPowerAfterImportLabel_VMNotFound(t *testing.T) {
+	mockDynamicClient := NewMockDynamicClient()
+	fakeK8sClient := fake.NewSimpleClientset()
+	client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, nil)
+
+	err := client.SetPowerAfterImportLabel("test-ns", "nonexistent-vm", "On")
+	if err == nil {
+		t.Error("Expected error for nonexistent VM")
+	}
+}
+
+func TestGetStorageProfileVolumeMode(t *testing.T) {
+	block := corev1.PersistentVolumeBlock
+	filesystem := corev1.PersistentVolumeFilesystem
+
+	tests := []struct {
+		name         string
+		storageClass string
+		profile      *cdiv1beta1.StorageProfile
+		wantMode     *corev1.PersistentVolumeMode
+	}{
+		{
+			name:         "empty storage class returns nil",
+			storageClass: "",
+			profile:      nil,
+			wantMode:     nil,
+		},
+		{
+			name:         "missing StorageProfile returns nil",
+			storageClass: "no-such-class",
+			profile:      nil,
+			wantMode:     nil,
+		},
+		{
+			name:         "StorageProfile with Block volume mode",
+			storageClass: "block-storage",
+			profile: &cdiv1beta1.StorageProfile{
+				ObjectMeta: metav1.ObjectMeta{Name: "block-storage"},
+				Status: cdiv1beta1.StorageProfileStatus{
+					ClaimPropertySets: []cdiv1beta1.ClaimPropertySet{
+						{
+							AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+							VolumeMode:  &block,
+						},
+					},
+				},
+			},
+			wantMode: &block,
+		},
+		{
+			name:         "StorageProfile with Filesystem volume mode",
+			storageClass: "fs-storage",
+			profile: &cdiv1beta1.StorageProfile{
+				ObjectMeta: metav1.ObjectMeta{Name: "fs-storage"},
+				Status: cdiv1beta1.StorageProfileStatus{
+					ClaimPropertySets: []cdiv1beta1.ClaimPropertySet{
+						{
+							AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+							VolumeMode:  &filesystem,
+						},
+					},
+				},
+			},
+			wantMode: &filesystem,
+		},
+		{
+			name:         "StorageProfile with multiple property sets uses first",
+			storageClass: "multi-storage",
+			profile: &cdiv1beta1.StorageProfile{
+				ObjectMeta: metav1.ObjectMeta{Name: "multi-storage"},
+				Status: cdiv1beta1.StorageProfileStatus{
+					ClaimPropertySets: []cdiv1beta1.ClaimPropertySet{
+						{
+							AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+							VolumeMode:  &block,
+						},
+						{
+							AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
+							VolumeMode:  &filesystem,
+						},
+					},
+				},
+			},
+			wantMode: &block,
+		},
+		{
+			name:         "StorageProfile with empty claimPropertySets returns nil",
+			storageClass: "empty-profile",
+			profile: &cdiv1beta1.StorageProfile{
+				ObjectMeta: metav1.ObjectMeta{Name: "empty-profile"},
+				Status:     cdiv1beta1.StorageProfileStatus{},
+			},
+			wantMode: nil,
+		},
+		{
+			name:         "StorageProfile with nil VolumeMode in first property set returns nil",
+			storageClass: "nil-mode",
+			profile: &cdiv1beta1.StorageProfile{
+				ObjectMeta: metav1.ObjectMeta{Name: "nil-mode"},
+				Status: cdiv1beta1.StorageProfileStatus{
+					ClaimPropertySets: []cdiv1beta1.ClaimPropertySet{
+						{
+							AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+							VolumeMode:  nil,
+						},
+					},
+				},
+			},
+			wantMode: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockDynamicClient := NewMockDynamicClient()
+			fakeK8sClient := fake.NewSimpleClientset()
+			client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, nil)
+
+			if tt.profile != nil {
+				if err := mockDynamicClient.AddStorageProfile(tt.profile); err != nil {
+					t.Fatalf("Failed to add StorageProfile: %v", err)
+				}
+			}
+
+			got := client.getStorageProfileVolumeMode(tt.storageClass)
+
+			if tt.wantMode == nil {
+				if got != nil {
+					t.Errorf("expected nil volume mode, got %v", *got)
+				}
+			} else {
+				if got == nil {
+					t.Fatalf("expected volume mode %v, got nil", *tt.wantMode)
+				}
+				if *got != *tt.wantMode {
+					t.Errorf("expected volume mode %v, got %v", *tt.wantMode, *got)
+				}
+			}
+		})
+	}
+}
+
+func TestEnsurePVC(t *testing.T) {
+	tests := []struct {
+		name         string
+		existingPVC  *corev1.PersistentVolumeClaim
+		expectErr    bool
+		expectCreate bool // true if ensurePVC should create a new PVC (vs reuse)
+	}{
+		{
+			name:         "no existing PVC creates a new one",
+			existingPVC:  nil,
+			expectCreate: true,
+		},
+		{
+			name: "existing Bound PVC is reused without recreation",
+			existingPVC: &corev1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pvc",
+					Namespace: "test-ns",
+				},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{
+							"storage": resource.MustParse("10Gi"),
+						},
+					},
+				},
+				Status: corev1.PersistentVolumeClaimStatus{
+					Phase: corev1.ClaimBound,
+				},
+			},
+			expectCreate: false,
+		},
+		{
+			name: "existing Pending PVC is reused without recreation",
+			existingPVC: &corev1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pvc",
+					Namespace: "test-ns",
+				},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{
+							"storage": resource.MustParse("10Gi"),
+						},
+					},
+				},
+				Status: corev1.PersistentVolumeClaimStatus{
+					Phase: corev1.ClaimPending,
+				},
+			},
+			expectCreate: false,
+		},
+		{
+			name: "existing Lost PVC is deleted and recreated",
+			existingPVC: &corev1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pvc",
+					Namespace: "test-ns",
+				},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{
+							"storage": resource.MustParse("10Gi"),
+						},
+					},
+				},
+				Status: corev1.PersistentVolumeClaimStatus{
+					Phase: corev1.ClaimLost,
+				},
+			},
+			expectCreate: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var objs []runtime.Object
+			if tt.existingPVC != nil {
+				objs = append(objs, tt.existingPVC)
+			}
+			fakeK8sClient := fake.NewSimpleClientset(objs...)
+			mockDynamicClient := NewMockDynamicClient()
+			client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, nil)
+
+			pvc := &corev1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pvc",
+					Namespace: "test-ns",
+				},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{
+							"storage": resource.MustParse("10Gi"),
+						},
+					},
+				},
+			}
+
+			ctx := context.Background()
+			err := client.ensurePVC(ctx, "test-ns", pvc)
+			if tt.expectErr {
+				if err == nil {
+					t.Fatal("expected error but got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			got, err := fakeK8sClient.CoreV1().PersistentVolumeClaims("test-ns").Get(ctx, "test-pvc", metav1.GetOptions{})
+			if err != nil {
+				t.Fatalf("PVC should exist after ensurePVC: %v", err)
+			}
+
+			if tt.expectCreate {
+				// Newly created PVC won't have Bound status in fake client
+				if got.Status.Phase == corev1.ClaimBound {
+					t.Error("expected newly created PVC, but got a Bound one (was not recreated)")
+				}
+			} else {
+				// Reused PVC should retain its original phase
+				if got.Status.Phase != tt.existingPVC.Status.Phase {
+					t.Errorf("expected reused PVC phase %s, got %s", tt.existingPVC.Status.Phase, got.Status.Phase)
+				}
+			}
+		})
+	}
+}
+
+// setupInsertVirtualMediaTest creates the common mock objects for insertVirtualMediaAsync tests.
+// It returns the client and mock dynamic client. The VM is pre-configured in the mock.
+// With no storage class configured the default volume mode is Filesystem, which routes
+// to the helper pod path. Use setupInsertVirtualMediaTestBlock for CDI path tests.
+func setupInsertVirtualMediaTest(t *testing.T, allowInsecureTLS bool, existingPVCs ...corev1.PersistentVolumeClaim) (*Client, *MockDynamicClient, *fake.Clientset) {
+	t.Helper()
+	return setupInsertVirtualMediaTestWithStorageClass(t, allowInsecureTLS, "", nil, existingPVCs...)
+}
+
+// setupInsertVirtualMediaTestBlock creates test fixtures with a Block storage class
+// and matching CDI StorageProfile so the CDI VolumeImportSource path is exercised.
+func setupInsertVirtualMediaTestBlock(t *testing.T, allowInsecureTLS bool, existingPVCs ...corev1.PersistentVolumeClaim) (*Client, *MockDynamicClient, *fake.Clientset) {
+	t.Helper()
+	block := corev1.PersistentVolumeBlock
+	sp := &cdiv1beta1.StorageProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "block-storage"},
+		Status: cdiv1beta1.StorageProfileStatus{
+			ClaimPropertySets: []cdiv1beta1.ClaimPropertySet{
+				{VolumeMode: &block},
+			},
+		},
+	}
+	return setupInsertVirtualMediaTestWithStorageClass(t, allowInsecureTLS, "block-storage", sp, existingPVCs...)
+}
+
+func setupInsertVirtualMediaTestWithStorageClass(t *testing.T, allowInsecureTLS bool, storageClass string, sp *cdiv1beta1.StorageProfile, existingPVCs ...corev1.PersistentVolumeClaim) (*Client, *MockDynamicClient, *fake.Clientset) {
+	t.Helper()
+
+	var objs []runtime.Object
+	for i := range existingPVCs {
+		objs = append(objs, &existingPVCs[i])
+	}
+	fakeK8sClient := fake.NewSimpleClientset(objs...)
+	mockDynamicClient := NewMockDynamicClient()
+
+	mockConfig := &MockConfig{}
+	mockConfig.dataVolumeConfig.storageSize = "10Gi"
+	mockConfig.dataVolumeConfig.allowInsecureTLS = allowInsecureTLS
+	mockConfig.dataVolumeConfig.storageClass = storageClass
+	mockConfig.dataVolumeConfig.vmUpdateTimeout = "30s"
+	mockConfig.dataVolumeConfig.isoDownloadTimeout = "30m"
+	mockConfig.dataVolumeConfig.helperImage = "alpine:latest"
+
+	if sp != nil {
+		if err := mockDynamicClient.AddStorageProfile(sp); err != nil {
+			t.Fatalf("Failed to add StorageProfile: %v", err)
+		}
+	}
+
+	vm := &kubevirtv1.VirtualMachine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-vm",
+			Namespace: "test-ns",
+		},
+		Spec: kubevirtv1.VirtualMachineSpec{
+			Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+				Spec: kubevirtv1.VirtualMachineInstanceSpec{
+					Domain: kubevirtv1.DomainSpec{
+						Devices: kubevirtv1.Devices{},
+					},
+				},
+			},
+		},
+	}
+	if err := mockDynamicClient.AddVM(vm); err != nil {
+		t.Fatalf("Failed to add VM: %v", err)
+	}
+
+	client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, mockConfig)
+	return client, mockDynamicClient, fakeK8sClient
+}
+
+func TestInsertVirtualMediaAsync_FilesystemUsesHelperPod(t *testing.T) {
+	// Default setup has no storage class → Filesystem → helper pod path
+	client, _, fakeK8s := setupInsertVirtualMediaTest(t, false)
+
+	err := client.insertVirtualMediaAsync("test-ns", "test-vm", "cdrom0", "http://example.com/image.iso")
+	if err != nil {
+		t.Fatalf("insertVirtualMediaAsync failed: %v", err)
+	}
+
+	pvcList, err := fakeK8s.CoreV1().PersistentVolumeClaims("test-ns").List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("Failed to list PVCs: %v", err)
+	}
+	if len(pvcList.Items) < 1 {
+		t.Fatal("Expected at least one PVC to be created")
+	}
+
+	// PVC must NOT have DataSourceRef (helper pod path creates a blank PVC)
+	for _, pvc := range pvcList.Items {
+		if pvc.Spec.DataSourceRef != nil {
+			t.Error("Filesystem PVC should not have DataSourceRef — helper pod path expected")
+		}
+	}
+
+	// Helper pod must be created
+	podList, err := fakeK8s.CoreV1().Pods("test-ns").List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("Failed to list pods: %v", err)
+	}
+	if len(podList.Items) < 1 {
+		t.Error("Expected helper pod to be created for Filesystem storage")
+	}
+
+	updatedVM, err := client.GetVM("test-ns", "test-vm")
+	if err != nil {
+		t.Fatalf("Failed to get VM: %v", err)
+	}
+
+	foundDisk := false
+	for _, disk := range updatedVM.Spec.Template.Spec.Domain.Devices.Disks {
+		if disk.Name == "cdrom0" && disk.CDRom != nil {
+			foundDisk = true
+			break
+		}
+	}
+	if !foundDisk {
+		t.Error("Expected cdrom0 disk to be added to VM")
+	}
+
+	// Helper pod path sets importing label with the pod name (no CDI prefix)
+	labelKey := ImportingLabelPrefix + "cdrom0"
+	labelVal := updatedVM.GetLabels()[labelKey]
+	if labelVal == "" {
+		t.Errorf("Expected importing label %s to be set", labelKey)
+	}
+	if strings.HasPrefix(labelVal, CDIImportPrefix) {
+		t.Errorf("Filesystem path should use helper pod importing label (no CDI prefix), got %q", labelVal)
+	}
+}
+
+func TestInsertVirtualMediaAsync_BlockUsesCDI(t *testing.T) {
+	// Block storage class → CDI VolumeImportSource path
+	client, _, fakeK8s := setupInsertVirtualMediaTestBlock(t, false)
+
+	err := client.insertVirtualMediaAsync("test-ns", "test-vm", "cdrom0", "http://example.com/image.iso")
+	if err != nil {
+		t.Fatalf("insertVirtualMediaAsync failed: %v", err)
+	}
+
+	pvcList, err := fakeK8s.CoreV1().PersistentVolumeClaims("test-ns").List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("Failed to list PVCs: %v", err)
+	}
+	if len(pvcList.Items) < 1 {
+		t.Fatal("Expected at least one PVC to be created")
+	}
+
+	updatedVM, err := client.GetVM("test-ns", "test-vm")
+	if err != nil {
+		t.Fatalf("Failed to get VM: %v", err)
+	}
+
+	foundDisk := false
+	for _, disk := range updatedVM.Spec.Template.Spec.Domain.Devices.Disks {
+		if disk.Name == "cdrom0" && disk.CDRom != nil {
+			foundDisk = true
+			break
+		}
+	}
+	if !foundDisk {
+		t.Error("Expected cdrom0 disk to be added to VM")
+	}
+
+	foundVolume := false
+	for _, vol := range updatedVM.Spec.Template.Spec.Volumes {
+		if vol.Name == "cdrom0" && vol.PersistentVolumeClaim != nil {
+			foundVolume = true
+			break
+		}
+	}
+	if !foundVolume {
+		t.Error("Expected cdrom0 volume to be added to VM")
+	}
+
+	// CDI path must set importing label with CDI prefix
+	labelKey := ImportingLabelPrefix + "cdrom0"
+	labelVal := updatedVM.GetLabels()[labelKey]
+	if !strings.HasPrefix(labelVal, CDIImportPrefix) {
+		t.Errorf("Expected importing label %s to start with %q, got %q", labelKey, CDIImportPrefix, labelVal)
+	}
+
+	// PVC must have DataSourceRef pointing to a VolumeImportSource
+	for _, pvc := range pvcList.Items {
+		if pvc.Labels[ImportPodVMLabel] == "test-vm" && pvc.Labels[ImportPodVolumeLabel] == "cdrom0" {
+			if pvc.Spec.DataSourceRef == nil {
+				t.Error("Block PVC must have DataSourceRef for CDI VolumeImportSource")
+			} else if pvc.Spec.DataSourceRef.Kind != "VolumeImportSource" {
+				t.Errorf("DataSourceRef kind must be VolumeImportSource, got %s", pvc.Spec.DataSourceRef.Kind)
+			}
+			if pvc.Spec.VolumeMode == nil || *pvc.Spec.VolumeMode != corev1.PersistentVolumeBlock {
+				t.Error("Block PVC must have VolumeMode=Block")
+			}
+			return
+		}
+	}
+	t.Error("Expected CDI PVC to carry vm.redfish and volume.vm.redfish labels")
+}
+
+func TestInsertVirtualMediaAsync_VMWithExistingRootDisk(t *testing.T) {
+	fakeK8sClient := fake.NewSimpleClientset()
+	mockDynamicClient := NewMockDynamicClient()
+
+	mockConfig := &MockConfig{}
+	mockConfig.dataVolumeConfig.storageSize = "3Gi"
+	mockConfig.dataVolumeConfig.allowInsecureTLS = false
+	mockConfig.dataVolumeConfig.storageClass = "block-storage"
+	mockConfig.dataVolumeConfig.vmUpdateTimeout = "30s"
+	mockConfig.dataVolumeConfig.isoDownloadTimeout = "30m"
+	mockConfig.dataVolumeConfig.helperImage = "alpine:latest"
+
+	block := corev1.PersistentVolumeBlock
+	sp := &cdiv1beta1.StorageProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "block-storage"},
+		Status: cdiv1beta1.StorageProfileStatus{
+			ClaimPropertySets: []cdiv1beta1.ClaimPropertySet{
+				{VolumeMode: &block},
+			},
+		},
+	}
+	if err := mockDynamicClient.AddStorageProfile(sp); err != nil {
+		t.Fatalf("Failed to add StorageProfile: %v", err)
+	}
+
+	rootBootOrder := uint(1)
+	vm := &kubevirtv1.VirtualMachine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-vm",
+			Namespace: "test-ns",
+		},
+		Spec: kubevirtv1.VirtualMachineSpec{
+			Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+				Spec: kubevirtv1.VirtualMachineInstanceSpec{
+					Domain: kubevirtv1.DomainSpec{
+						Devices: kubevirtv1.Devices{
+							Disks: []kubevirtv1.Disk{
+								{
+									Name:      "rootdisk",
+									BootOrder: &rootBootOrder,
+									DiskDevice: kubevirtv1.DiskDevice{
+										Disk: &kubevirtv1.DiskTarget{Bus: kubevirtv1.DiskBusVirtio},
+									},
+								},
+							},
+						},
+					},
+					Volumes: []kubevirtv1.Volume{
+						{
+							Name: "rootdisk",
+							VolumeSource: kubevirtv1.VolumeSource{
+								DataVolume: &kubevirtv1.DataVolumeSource{Name: "test-vm-rootdisk"},
+							},
+						},
+					},
+				},
+			},
+			DataVolumeTemplates: []kubevirtv1.DataVolumeTemplateSpec{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "test-vm-rootdisk"},
+					Spec: cdiv1beta1.DataVolumeSpec{
+						Storage: &cdiv1beta1.StorageSpec{
+							Resources: corev1.VolumeResourceRequirements{
+								Requests: corev1.ResourceList{
+									"storage": resource.MustParse("120Gi"),
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	if err := mockDynamicClient.AddVM(vm); err != nil {
+		t.Fatalf("Failed to add VM: %v", err)
+	}
+
+	client := NewClientWithClients(fakeK8sClient, mockDynamicClient, 30*time.Second, mockConfig)
+
+	err := client.insertVirtualMediaAsync("test-ns", "test-vm", "cdrom0", "http://example.com/agent.iso")
+	if err != nil {
+		t.Fatalf("insertVirtualMediaAsync failed: %v", err)
+	}
+
+	updatedVM, err := mockDynamicClient.GetVM("test-ns", "test-vm")
+	if err != nil {
+		t.Fatalf("Failed to get VM: %v", err)
+	}
+
+	// Rootdisk must be unchanged
+	var rootdiskVol *kubevirtv1.Volume
+	var cdromVol *kubevirtv1.Volume
+	for i, vol := range updatedVM.Spec.Template.Spec.Volumes {
+		switch vol.Name {
+		case "rootdisk":
+			rootdiskVol = &updatedVM.Spec.Template.Spec.Volumes[i]
+		case "cdrom0":
+			cdromVol = &updatedVM.Spec.Template.Spec.Volumes[i]
+		}
+	}
+
+	if rootdiskVol == nil {
+		t.Fatal("Rootdisk volume must still be present after virtual media insertion")
+	}
+	if rootdiskVol.DataVolume == nil || rootdiskVol.DataVolume.Name != "test-vm-rootdisk" {
+		t.Errorf("Rootdisk volume must still reference DataVolume test-vm-rootdisk, got %+v", rootdiskVol.VolumeSource)
+	}
+
+	if cdromVol == nil {
+		t.Fatal("cdrom0 volume must be created by virtual media insertion")
+	}
+	if cdromVol.PersistentVolumeClaim == nil {
+		t.Fatal("cdrom0 volume must reference a PVC")
+	}
+	bootIsoPVCName := cdromVol.PersistentVolumeClaim.ClaimName
+	if !strings.Contains(bootIsoPVCName, "bootiso") {
+		t.Errorf("cdrom0 PVC name should contain 'bootiso', got %s", bootIsoPVCName)
+	}
+
+	// Rootdisk disk entry must be unchanged (virtio, boot order 1)
+	var rootdiskDisk *kubevirtv1.Disk
+	var cdromDisk *kubevirtv1.Disk
+	for i, disk := range updatedVM.Spec.Template.Spec.Domain.Devices.Disks {
+		switch disk.Name {
+		case "rootdisk":
+			rootdiskDisk = &updatedVM.Spec.Template.Spec.Domain.Devices.Disks[i]
+		case "cdrom0":
+			cdromDisk = &updatedVM.Spec.Template.Spec.Domain.Devices.Disks[i]
+		}
+	}
+
+	if rootdiskDisk == nil {
+		t.Fatal("Rootdisk disk entry must still be present")
+	}
+	if rootdiskDisk.Disk == nil || rootdiskDisk.Disk.Bus != kubevirtv1.DiskBusVirtio {
+		t.Error("Rootdisk must remain a virtio disk (not converted to cdrom)")
+	}
+	if rootdiskDisk.BootOrder == nil || *rootdiskDisk.BootOrder != 1 {
+		t.Error("Rootdisk boot order must be preserved")
+	}
+
+	if cdromDisk == nil {
+		t.Fatal("cdrom0 disk must be created")
+	}
+	if cdromDisk.CDRom == nil {
+		t.Error("cdrom0 must be a CDRom device")
+	}
+
+	// Verify the boot ISO PVC was created with correct DataSourceRef
+	bootIsoPVC, err := fakeK8sClient.CoreV1().PersistentVolumeClaims("test-ns").Get(
+		context.Background(), bootIsoPVCName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Boot ISO PVC %s must exist: %v", bootIsoPVCName, err)
+	}
+
+	if bootIsoPVC.Spec.DataSourceRef == nil {
+		t.Fatal("Boot ISO PVC must have DataSourceRef pointing to a VolumeImportSource")
+	}
+	if bootIsoPVC.Spec.DataSourceRef.Kind != "VolumeImportSource" {
+		t.Errorf("DataSourceRef kind must be VolumeImportSource, got %s", bootIsoPVC.Spec.DataSourceRef.Kind)
+	}
+	expectedVISName := sanitizeResourceName(fmt.Sprintf("%s-populator", bootIsoPVCName))
+	if bootIsoPVC.Spec.DataSourceRef.Name != expectedVISName {
+		t.Errorf("DataSourceRef must reference %s, got %s", expectedVISName, bootIsoPVC.Spec.DataSourceRef.Name)
+	}
+
+	// Verify VolumeImportSource was created and references the ISO URL
+	gvrVIS := schema.GroupVersionResource{Group: "cdi.kubevirt.io", Version: "v1beta1", Resource: "volumeimportsources"}
+	visObj, err := mockDynamicClient.Resource(gvrVIS).Namespace("test-ns").Get(
+		context.Background(), expectedVISName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("VolumeImportSource %s must exist: %v", expectedVISName, err)
+	}
+	httpURL, _, _ := unstructured.NestedString(visObj.Object, "spec", "source", "http", "url")
+	if httpURL != "http://example.com/agent.iso" {
+		t.Errorf("VolumeImportSource must reference the ISO URL, got %s", httpURL)
+	}
+
+	// Verify PVC carries the correct VM tracking labels
+	if bootIsoPVC.Labels[ImportPodVMLabel] != "test-vm" {
+		t.Errorf("Boot ISO PVC must have %s=test-vm label, got %s", ImportPodVMLabel, bootIsoPVC.Labels[ImportPodVMLabel])
+	}
+	if bootIsoPVC.Labels[ImportPodVolumeLabel] != "cdrom0" {
+		t.Errorf("Boot ISO PVC must have %s=cdrom0 label, got %s", ImportPodVolumeLabel, bootIsoPVC.Labels[ImportPodVolumeLabel])
+	}
+
+	// Verify the importing label on the VM references the boot ISO PVC
+	importLabel := updatedVM.GetLabels()[ImportingLabelPrefix+"cdrom0"]
+	if importLabel != CDIImportPrefix+bootIsoPVCName {
+		t.Errorf("Importing label must be %s%s, got %s", CDIImportPrefix, bootIsoPVCName, importLabel)
+	}
+
+	// DataVolumeTemplates must be untouched
+	if len(updatedVM.Spec.DataVolumeTemplates) != 1 {
+		t.Errorf("DataVolumeTemplates should be unchanged (1 entry), got %d", len(updatedVM.Spec.DataVolumeTemplates))
+	}
+	if updatedVM.Spec.DataVolumeTemplates[0].Name != "test-vm-rootdisk" {
+		t.Errorf("DataVolumeTemplate must still be test-vm-rootdisk, got %s", updatedVM.Spec.DataVolumeTemplates[0].Name)
+	}
+}
+
+func TestInsertVirtualMediaAsync_RepeatedInsertion(t *testing.T) {
+	client, mockDynamic, fakeK8s := setupInsertVirtualMediaTestBlock(t, false)
+
+	// --- First insertion ---
+	err := client.insertVirtualMediaAsync("test-ns", "test-vm", "cdrom0", "http://example.com/first.iso")
+	if err != nil {
+		t.Fatalf("First insertVirtualMediaAsync failed: %v", err)
+	}
+
+	vm1, err := mockDynamic.GetVM("test-ns", "test-vm")
+	if err != nil {
+		t.Fatalf("Failed to get VM after first insert: %v", err)
+	}
+
+	// Find the PVC name from the cdrom0 volume
+	var firstPVCName string
+	for _, vol := range vm1.Spec.Template.Spec.Volumes {
+		if vol.Name == "cdrom0" && vol.PersistentVolumeClaim != nil {
+			firstPVCName = vol.PersistentVolumeClaim.ClaimName
+			break
+		}
+	}
+	if firstPVCName == "" {
+		t.Fatal("Expected cdrom0 volume to reference a PVC after first insert")
+	}
+
+	// Verify PVC exists
+	_, err = fakeK8s.CoreV1().PersistentVolumeClaims("test-ns").Get(context.Background(), firstPVCName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Expected PVC %s to exist after first insert: %v", firstPVCName, err)
+	}
+
+	// Verify VolumeImportSource exists
+	firstVISName := sanitizeResourceName(fmt.Sprintf("%s-populator", firstPVCName))
+	gvrVIS := schema.GroupVersionResource{Group: "cdi.kubevirt.io", Version: "v1beta1", Resource: "volumeimportsources"}
+	_, err = mockDynamic.Resource(gvrVIS).Namespace("test-ns").Get(context.Background(), firstVISName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Expected VolumeImportSource %s to exist after first insert: %v", firstVISName, err)
+	}
+
+	firstImportLabel := vm1.GetLabels()[ImportingLabelPrefix+"cdrom0"]
+	if !strings.HasPrefix(firstImportLabel, CDIImportPrefix) {
+		t.Fatalf("Expected importing label to start with %q, got %q", CDIImportPrefix, firstImportLabel)
+	}
+
+	// --- Second insertion with different URL ---
+	err = client.insertVirtualMediaAsync("test-ns", "test-vm", "cdrom0", "http://example.com/second.iso")
+	if err != nil {
+		t.Fatalf("Second insertVirtualMediaAsync failed: %v", err)
+	}
+
+	vm2, err := mockDynamic.GetVM("test-ns", "test-vm")
+	if err != nil {
+		t.Fatalf("Failed to get VM after second insert: %v", err)
+	}
+
+	// cdrom0 disk must still exist
+	foundDisk := false
+	for _, disk := range vm2.Spec.Template.Spec.Domain.Devices.Disks {
+		if disk.Name == "cdrom0" && disk.CDRom != nil {
+			foundDisk = true
+			break
+		}
+	}
+	if !foundDisk {
+		t.Error("Expected cdrom0 disk to still exist after second insert")
+	}
+
+	// cdrom0 volume must point to a DIFFERENT (new) PVC
+	var secondPVCName string
+	for _, vol := range vm2.Spec.Template.Spec.Volumes {
+		if vol.Name == "cdrom0" && vol.PersistentVolumeClaim != nil {
+			secondPVCName = vol.PersistentVolumeClaim.ClaimName
+			break
+		}
+	}
+	if secondPVCName == "" {
+		t.Fatal("Expected cdrom0 volume to reference a PVC after second insert")
+	}
+	if secondPVCName == firstPVCName {
+		t.Errorf("Expected cdrom0 volume to be updated to a new PVC, but still references %s", firstPVCName)
+	}
+
+	// New PVC must exist
+	_, err = fakeK8s.CoreV1().PersistentVolumeClaims("test-ns").Get(context.Background(), secondPVCName, metav1.GetOptions{})
+	if err != nil {
+		t.Errorf("Expected new PVC %s to exist: %v", secondPVCName, err)
+	}
+
+	// Old PVC must be cleaned up
+	_, err = fakeK8s.CoreV1().PersistentVolumeClaims("test-ns").Get(context.Background(), firstPVCName, metav1.GetOptions{})
+	if err == nil {
+		t.Errorf("Expected old PVC %s to be deleted after second insertion, but it still exists", firstPVCName)
+	}
+
+	// Old VolumeImportSource must be cleaned up
+	_, err = mockDynamic.Resource(gvrVIS).Namespace("test-ns").Get(context.Background(), firstVISName, metav1.GetOptions{})
+	if err == nil {
+		t.Errorf("Expected old VolumeImportSource %s to be deleted after second insertion, but it still exists", firstVISName)
+	}
+
+	// Importing label must reference the new import
+	secondImportLabel := vm2.GetLabels()[ImportingLabelPrefix+"cdrom0"]
+	if secondImportLabel == firstImportLabel {
+		t.Errorf("Expected importing label to be updated, but still has value %q", firstImportLabel)
+	}
+	if !strings.HasPrefix(secondImportLabel, CDIImportPrefix) {
+		t.Errorf("Expected importing label to start with %q, got %q", CDIImportPrefix, secondImportLabel)
+	}
+}
+
+func TestInsertVirtualMediaAsync_HTTPSFlow(t *testing.T) {
+	tests := []struct {
+		name        string
+		existingPVC *corev1.PersistentVolumeClaim
+		wantReuse   bool
+	}{
+		{
+			name:      "HTTPS with no existing PVC creates new PVC via CDI",
+			wantReuse: false,
+		},
+		{
+			name: "HTTPS with existing Bound PVC reuses it",
+			existingPVC: &corev1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "override-pvc",
+					Namespace: "test-ns",
+				},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{
+							"storage": resource.MustParse("10Gi"),
+						},
+					},
+				},
+				Status: corev1.PersistentVolumeClaimStatus{
+					Phase: corev1.ClaimBound,
+				},
+			},
+			wantReuse: true,
+		},
+		{
+			name: "HTTPS with existing Lost PVC deletes and recreates",
+			existingPVC: &corev1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "override-pvc",
+					Namespace: "test-ns",
+				},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{
+							"storage": resource.MustParse("10Gi"),
+						},
+					},
+				},
+				Status: corev1.PersistentVolumeClaimStatus{
+					Phase: corev1.ClaimLost,
+				},
+			},
+			wantReuse: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var pvcs []corev1.PersistentVolumeClaim
+			if tt.existingPVC != nil {
+				pvcs = append(pvcs, *tt.existingPVC)
+			}
+			// allowInsecureTLS=false + https + Block storage -> CDI path
+			client, _, fakeK8s := setupInsertVirtualMediaTestBlock(t, false, pvcs...)
+
+			err := client.insertVirtualMediaAsync("test-ns", "test-vm", "cdrom0", "https://example.com/image.iso")
+			if err != nil {
+				t.Fatalf("insertVirtualMediaAsync failed: %v", err)
+			}
+
+			pvcList, err := fakeK8s.CoreV1().PersistentVolumeClaims("test-ns").List(context.Background(), metav1.ListOptions{})
+			if err != nil {
+				t.Fatalf("Failed to list PVCs: %v", err)
+			}
+			if len(pvcList.Items) < 1 {
+				t.Error("Expected at least one PVC to exist")
+			}
+
+			updatedVM, err := client.GetVM("test-ns", "test-vm")
+			if err != nil {
+				t.Fatalf("Failed to get VM: %v", err)
+			}
+
+			foundDisk := false
+			for _, disk := range updatedVM.Spec.Template.Spec.Domain.Devices.Disks {
+				if disk.Name == "cdrom0" && disk.CDRom != nil {
+					foundDisk = true
+				}
+			}
+			if !foundDisk {
+				t.Error("Expected cdrom0 disk to be added to VM")
+			}
+
+			// CDI path must set importing label (HTTPS without insecure also uses CDI)
+			labelKey := ImportingLabelPrefix + "cdrom0"
+			labelVal := updatedVM.GetLabels()[labelKey]
+			if !strings.HasPrefix(labelVal, CDIImportPrefix) {
+				t.Errorf("Expected importing label %s to start with %q, got %q", labelKey, CDIImportPrefix, labelVal)
+			}
+		})
+	}
+}
+
+func TestInsertVirtualMediaAsync_InsecureHTTPSFlow(t *testing.T) {
+	tests := []struct {
+		name        string
+		existingPVC *corev1.PersistentVolumeClaim
+		wantReuse   bool
+	}{
+		{
+			name:      "insecure HTTPS with no existing PVC creates new PVC via helper pod",
+			wantReuse: false,
+		},
+		{
+			name: "insecure HTTPS with existing Bound PVC reuses it",
+			existingPVC: &corev1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "override-pvc",
+					Namespace: "test-ns",
+				},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{
+							"storage": resource.MustParse("10Gi"),
+						},
+					},
+				},
+				Status: corev1.PersistentVolumeClaimStatus{
+					Phase: corev1.ClaimBound,
+				},
+			},
+			wantReuse: true,
+		},
+		{
+			name: "insecure HTTPS with existing Lost PVC deletes and recreates",
+			existingPVC: &corev1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "override-pvc",
+					Namespace: "test-ns",
+				},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{
+							"storage": resource.MustParse("10Gi"),
+						},
+					},
+				},
+				Status: corev1.PersistentVolumeClaimStatus{
+					Phase: corev1.ClaimLost,
+				},
+			},
+			wantReuse: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var pvcs []corev1.PersistentVolumeClaim
+			if tt.existingPVC != nil {
+				pvcs = append(pvcs, *tt.existingPVC)
+			}
+			// allowInsecureTLS=true + https -> helper pod path
+			client, _, fakeK8s := setupInsertVirtualMediaTest(t, true, pvcs...)
+
+			err := client.insertVirtualMediaAsync("test-ns", "test-vm", "cdrom0", "https://example.com/image.iso")
+			if err != nil {
+				t.Fatalf("insertVirtualMediaAsync failed: %v", err)
+			}
+
+			pvcList, err := fakeK8s.CoreV1().PersistentVolumeClaims("test-ns").List(context.Background(), metav1.ListOptions{})
+			if err != nil {
+				t.Fatalf("Failed to list PVCs: %v", err)
+			}
+			if len(pvcList.Items) < 1 {
+				t.Error("Expected at least one PVC to exist")
+			}
+
+			// Verify helper pod was created
+			podList, err := fakeK8s.CoreV1().Pods("test-ns").List(context.Background(), metav1.ListOptions{})
+			if err != nil {
+				t.Fatalf("Failed to list pods: %v", err)
+			}
+			if len(podList.Items) < 1 {
+				t.Error("Expected helper pod to be created for insecure HTTPS flow")
+			}
+
+			updatedVM, err := client.GetVM("test-ns", "test-vm")
+			if err != nil {
+				t.Fatalf("Failed to get VM: %v", err)
+			}
+
+			foundDisk := false
+			for _, disk := range updatedVM.Spec.Template.Spec.Domain.Devices.Disks {
+				if disk.Name == "cdrom0" && disk.CDRom != nil {
+					foundDisk = true
+				}
+			}
+			if !foundDisk {
+				t.Error("Expected cdrom0 disk to be added to VM")
+			}
+		})
+	}
+}
+
+func TestHandleCDIPVCBound_RemovesImportingLabel(t *testing.T) {
+	mockDynamic := NewMockDynamicClient()
+	fakeK8s := fake.NewSimpleClientset()
+
+	vm := newTestVM("test-ns", "test-vm", map[string]string{
+		ImportingLabelPrefix + "cdrom0": CDIImportPrefix + "test-pvc",
+		PowerAfterImportLabel:           "On",
+	}, nil)
+	mockDynamic.AddVM(vm)
+
+	client := NewClientWithClients(fakeK8s, mockDynamic, 30*time.Second, nil)
+
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pvc",
+			Namespace: "test-ns",
+			Labels: map[string]string{
+				ImportPodVMLabel:     "test-vm",
+				ImportPodVolumeLabel: "cdrom0",
+			},
+		},
+		Status: corev1.PersistentVolumeClaimStatus{
+			Phase: corev1.ClaimBound,
+		},
+	}
+
+	client.handleCDIPVCBound(pvc)
+
+	updated, err := mockDynamic.GetVM("test-ns", "test-vm")
+	if err != nil {
+		t.Fatalf("Failed to get VM: %v", err)
+	}
+
+	if _, found := updated.GetLabels()[ImportingLabelPrefix+"cdrom0"]; found {
+		t.Error("Expected importing label to be removed after PVC became Bound")
+	}
+}
+
+func TestHandleCDIPVCBound_WorksWithDataSourceRefPresent(t *testing.T) {
+	mockDynamic := NewMockDynamicClient()
+	fakeK8s := fake.NewSimpleClientset()
+
+	vm := newTestVM("test-ns", "test-vm", map[string]string{
+		ImportingLabelPrefix + "cdrom0": CDIImportPrefix + "test-pvc",
+		PowerAfterImportLabel:           "On",
+	}, nil)
+	mockDynamic.AddVM(vm)
+
+	client := NewClientWithClients(fakeK8s, mockDynamic, 30*time.Second, nil)
+
+	// CDI does NOT clear DataSourceRef after population — it stays on
+	// the PVC permanently. The Bound status on the original PVC is the
+	// reliable completion signal for volume-populator PVCs.
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pvc",
+			Namespace: "test-ns",
+			Labels: map[string]string{
+				ImportPodVMLabel:     "test-vm",
+				ImportPodVolumeLabel: "cdrom0",
+			},
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			DataSourceRef: &corev1.TypedObjectReference{
+				APIGroup: stringPtr("cdi.kubevirt.io"),
+				Kind:     "VolumeImportSource",
+				Name:     "test-populator",
+			},
+		},
+		Status: corev1.PersistentVolumeClaimStatus{
+			Phase: corev1.ClaimBound,
+		},
+	}
+
+	client.handleCDIPVCBound(pvc)
+
+	updated, err := mockDynamic.GetVM("test-ns", "test-vm")
+	if err != nil {
+		t.Fatalf("Failed to get VM: %v", err)
+	}
+
+	if _, found := updated.GetLabels()[ImportingLabelPrefix+"cdrom0"]; found {
+		t.Error("Importing label should be removed — Bound original PVC with DataSourceRef means CDI completed (DataSourceRef is never cleared)")
+	}
+}
+
+func TestHandleCDIPVCBound_IgnoresNonCDILabel(t *testing.T) {
+	mockDynamic := NewMockDynamicClient()
+	fakeK8s := fake.NewSimpleClientset()
+
+	// importing label has a pod name, not the CDI prefix
+	vm := newTestVM("test-ns", "test-vm", map[string]string{
+		ImportingLabelPrefix + "cdrom0": "copy-iso-pod-123",
+	}, nil)
+	mockDynamic.AddVM(vm)
+
+	client := NewClientWithClients(fakeK8s, mockDynamic, 30*time.Second, nil)
+
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pvc",
+			Namespace: "test-ns",
+			Labels: map[string]string{
+				ImportPodVMLabel:     "test-vm",
+				ImportPodVolumeLabel: "cdrom0",
+			},
+		},
+		Status: corev1.PersistentVolumeClaimStatus{
+			Phase: corev1.ClaimBound,
+		},
+	}
+
+	client.handleCDIPVCBound(pvc)
+
+	updated, err := mockDynamic.GetVM("test-ns", "test-vm")
+	if err != nil {
+		t.Fatalf("Failed to get VM: %v", err)
+	}
+
+	labelVal := updated.GetLabels()[ImportingLabelPrefix+"cdrom0"]
+	if labelVal != "copy-iso-pod-123" {
+		t.Errorf("Expected helper-pod importing label to be preserved, got %q", labelVal)
+	}
+}
+
+func TestHandleCDIPVCBound_IgnoresPrimePVC(t *testing.T) {
+	mockDynamic := NewMockDynamicClient()
+	fakeK8s := fake.NewSimpleClientset()
+
+	vm := newTestVM("test-ns", "test-vm", map[string]string{
+		ImportingLabelPrefix + "cdrom0": CDIImportPrefix + "test-pvc",
+		PowerAfterImportLabel:           "On",
+	}, nil)
+	mockDynamic.AddVM(vm)
+
+	client := NewClientWithClients(fakeK8s, mockDynamic, 30*time.Second, nil)
+
+	// CDI prime PVC inherits our labels but has a different name
+	primePVC := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "prime-5f2ddb7b-7191-4260-a3fb-bf0f0f91def5",
+			Namespace: "test-ns",
+			Labels: map[string]string{
+				ImportPodVMLabel:     "test-vm",
+				ImportPodVolumeLabel: "cdrom0",
+			},
+		},
+		Status: corev1.PersistentVolumeClaimStatus{
+			Phase: corev1.ClaimBound,
+		},
+	}
+
+	client.handleCDIPVCBound(primePVC)
+
+	updated, err := mockDynamic.GetVM("test-ns", "test-vm")
+	if err != nil {
+		t.Fatalf("Failed to get VM: %v", err)
+	}
+
+	if _, found := updated.GetLabels()[ImportingLabelPrefix+"cdrom0"]; !found {
+		t.Error("Importing label should NOT be removed when a CDI prime PVC becomes Bound — must wait for original PVC")
+	}
+}
+
+func TestCDIImportDetectedByIsImportInProgress(t *testing.T) {
+	mockDynamic := NewMockDynamicClient()
+	fakeK8s := fake.NewSimpleClientset()
+
+	vm := newTestVM("test-ns", "test-vm", map[string]string{
+		ImportingLabelPrefix + "cdrom0": CDIImportPrefix + "test-pvc",
+	}, nil)
+	mockDynamic.AddVM(vm)
+
+	client := NewClientWithClients(fakeK8s, mockDynamic, 30*time.Second, nil)
+
+	importing, err := client.IsImportInProgress("test-ns", "test-vm")
+	if err != nil {
+		t.Fatalf("IsImportInProgress failed: %v", err)
+	}
+	if !importing {
+		t.Error("Expected IsImportInProgress to return true for CDI import label")
+	}
+}
+
+func TestReconcileExistingCDIPVCs(t *testing.T) {
+	mockDynamic := NewMockDynamicClient()
+
+	boundPVC := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pvc",
+			Namespace: "test-ns",
+			Labels: map[string]string{
+				ImportPodVMLabel:     "test-vm",
+				ImportPodVolumeLabel: "cdrom0",
+			},
+		},
+		Status: corev1.PersistentVolumeClaimStatus{
+			Phase: corev1.ClaimBound,
+		},
+	}
+	fakeK8s := fake.NewSimpleClientset(boundPVC)
+
+	vm := newTestVM("test-ns", "test-vm", map[string]string{
+		ImportingLabelPrefix + "cdrom0": CDIImportPrefix + "test-pvc",
+		PowerAfterImportLabel:           "On",
+	}, nil)
+	mockDynamic.AddVM(vm)
+
+	client := NewClientWithClients(fakeK8s, mockDynamic, 30*time.Second, nil)
+
+	err := client.reconcileExistingCDIPVCs("test-ns")
+	if err != nil {
+		t.Fatalf("reconcileExistingCDIPVCs failed: %v", err)
+	}
+
+	updated, err := mockDynamic.GetVM("test-ns", "test-vm")
+	if err != nil {
+		t.Fatalf("Failed to get VM: %v", err)
+	}
+
+	if _, found := updated.GetLabels()[ImportingLabelPrefix+"cdrom0"]; found {
+		t.Error("Expected importing label to be removed after reconciliation of Bound PVC")
+	}
+}
+
+func TestIsCDIManagedPod(t *testing.T) {
+	tests := []struct {
+		name   string
+		labels map[string]string
+		want   bool
+	}{
+		{
+			name:   "CDI importer pod",
+			labels: map[string]string{CDIManagedLabel: "importer", ImportPodVMLabel: "vm-1"},
+			want:   true,
+		},
+		{
+			name:   "our helper pod",
+			labels: map[string]string{ImportPodVMLabel: "vm-1", ImportPodVolumeLabel: "cdrom0"},
+			want:   false,
+		},
+		{
+			name:   "no labels",
+			labels: nil,
+			want:   false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Labels: tt.labels}}
+			if got := isCDIManagedPod(pod); got != tt.want {
+				t.Errorf("isCDIManagedPod() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHandleImportPodCompleted_SkipsCDIPod(t *testing.T) {
+	mockDynamic := NewMockDynamicClient()
+
+	// CDI importer pod with both CDI and our labels (CDI copies PVC labels)
+	cdiPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "importer-prime-abc123",
+			Namespace: "test-ns",
+			Labels: map[string]string{
+				CDIManagedLabel:      "importer",
+				ImportPodVMLabel:     "test-vm",
+				ImportPodVolumeLabel: "cdrom0",
+			},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodFailed},
+	}
+	fakeK8s := fake.NewSimpleClientset(cdiPod)
+
+	vm := newTestVM("test-ns", "test-vm", map[string]string{
+		ImportingLabelPrefix + "cdrom0": CDIImportPrefix + "test-pvc",
+	}, nil)
+	mockDynamic.AddVM(vm)
+
+	client := NewClientWithClients(fakeK8s, mockDynamic, 30*time.Second, nil)
+
+	// Reconcile should skip the CDI pod
+	err := client.reconcileExistingImportPods("test-ns")
+	if err != nil {
+		t.Fatalf("reconcileExistingImportPods failed: %v", err)
+	}
+
+	// The CDI pod must still exist (not deleted)
+	_, err = fakeK8s.CoreV1().Pods("test-ns").Get(context.Background(), "importer-prime-abc123", metav1.GetOptions{})
+	if err != nil {
+		t.Errorf("CDI pod should not have been deleted, but got: %v", err)
+	}
+
+	// The importing label must still be on the VM (not removed)
+	updated, err := mockDynamic.GetVM("test-ns", "test-vm")
+	if err != nil {
+		t.Fatalf("Failed to get VM: %v", err)
+	}
+	if _, found := updated.GetLabels()[ImportingLabelPrefix+"cdrom0"]; !found {
+		t.Error("CDI importing label should NOT have been removed — that is the CDI PVC watcher's job")
+	}
+}
+
+func TestHandleImportPodCompleted_ProcessesOurHelperPod(t *testing.T) {
+	mockDynamic := NewMockDynamicClient()
+
+	// Our helper pod (no CDI label)
+	helperPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "copy-iso-test-pvc-12345",
+			Namespace: "test-ns",
+			Labels: map[string]string{
+				ImportPodVMLabel:     "test-vm",
+				ImportPodVolumeLabel: "cdrom0",
+			},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodSucceeded},
+	}
+	fakeK8s := fake.NewSimpleClientset(helperPod)
+
+	vm := newTestVM("test-ns", "test-vm", map[string]string{
+		ImportingLabelPrefix + "cdrom0": "copy-iso-test-pvc-12345",
+	}, nil)
+	mockDynamic.AddVM(vm)
+
+	client := NewClientWithClients(fakeK8s, mockDynamic, 30*time.Second, nil)
+
+	err := client.reconcileExistingImportPods("test-ns")
+	if err != nil {
+		t.Fatalf("reconcileExistingImportPods failed: %v", err)
+	}
+
+	// The helper pod should be deleted
+	_, err = fakeK8s.CoreV1().Pods("test-ns").Get(context.Background(), "copy-iso-test-pvc-12345", metav1.GetOptions{})
+	if err == nil {
+		t.Error("Helper pod should have been deleted after completion")
+	}
+
+	// The importing label should be removed
+	updated, err := mockDynamic.GetVM("test-ns", "test-vm")
+	if err != nil {
+		t.Fatalf("Failed to get VM: %v", err)
+	}
+	if _, found := updated.GetLabels()[ImportingLabelPrefix+"cdrom0"]; found {
+		t.Error("Importing label should have been removed for completed helper pod")
+	}
+}
+
+func TestCheckInsertedMedia_NoMediaInserted(t *testing.T) {
+	mockDynamic := NewMockDynamicClient()
+	vm := newTestVM("test-ns", "test-vm", nil, nil)
+	mockDynamic.AddVM(vm)
+
+	client := NewClientWithClients(fake.NewSimpleClientset(), mockDynamic, 30*time.Second, nil)
+
+	state, err := client.CheckInsertedMedia("test-ns", "test-vm", "cdrom0", "http://example.com/test.iso")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if state != MediaStateNone {
+		t.Errorf("expected MediaStateNone, got %d", state)
+	}
+}
+
+func TestCheckInsertedMedia_SameURLReady(t *testing.T) {
+	mockDynamic := NewMockDynamicClient()
+	vm := newTestVM("test-ns", "test-vm", nil, map[string]string{
+		VirtualMediaURLAnnotationPrefix + "cdrom0": "http://example.com/test.iso",
+	})
+	vm.Spec.Template.Spec.Volumes = append(vm.Spec.Template.Spec.Volumes, kubevirtv1.Volume{
+		Name: "cdrom0",
+		VolumeSource: kubevirtv1.VolumeSource{
+			PersistentVolumeClaim: &kubevirtv1.PersistentVolumeClaimVolumeSource{
+				PersistentVolumeClaimVolumeSource: corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: "test-vm-bootiso-123",
+				},
+			},
+		},
+	})
+	mockDynamic.AddVM(vm)
+
+	client := NewClientWithClients(fake.NewSimpleClientset(), mockDynamic, 30*time.Second, nil)
+
+	state, err := client.CheckInsertedMedia("test-ns", "test-vm", "cdrom0", "http://example.com/test.iso")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if state != MediaStateReady {
+		t.Errorf("expected MediaStateReady, got %d", state)
+	}
+}
+
+func TestCheckInsertedMedia_SameURLImporting(t *testing.T) {
+	mockDynamic := NewMockDynamicClient()
+	vm := newTestVM("test-ns", "test-vm",
+		map[string]string{ImportingLabelPrefix + "cdrom0": "cdi-test-vm-bootiso-123"},
+		map[string]string{VirtualMediaURLAnnotationPrefix + "cdrom0": "http://example.com/test.iso"},
+	)
+	vm.Spec.Template.Spec.Volumes = append(vm.Spec.Template.Spec.Volumes, kubevirtv1.Volume{
+		Name: "cdrom0",
+		VolumeSource: kubevirtv1.VolumeSource{
+			PersistentVolumeClaim: &kubevirtv1.PersistentVolumeClaimVolumeSource{
+				PersistentVolumeClaimVolumeSource: corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: "test-vm-bootiso-123",
+				},
+			},
+		},
+	})
+	mockDynamic.AddVM(vm)
+
+	client := NewClientWithClients(fake.NewSimpleClientset(), mockDynamic, 30*time.Second, nil)
+
+	state, err := client.CheckInsertedMedia("test-ns", "test-vm", "cdrom0", "http://example.com/test.iso")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if state != MediaStateImporting {
+		t.Errorf("expected MediaStateImporting, got %d", state)
+	}
+}
+
+func TestCheckInsertedMedia_DifferentURLConflict(t *testing.T) {
+	mockDynamic := NewMockDynamicClient()
+	vm := newTestVM("test-ns", "test-vm", nil, map[string]string{
+		VirtualMediaURLAnnotationPrefix + "cdrom0": "http://example.com/original.iso",
+	})
+	vm.Spec.Template.Spec.Volumes = append(vm.Spec.Template.Spec.Volumes, kubevirtv1.Volume{
+		Name: "cdrom0",
+		VolumeSource: kubevirtv1.VolumeSource{
+			PersistentVolumeClaim: &kubevirtv1.PersistentVolumeClaimVolumeSource{
+				PersistentVolumeClaimVolumeSource: corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: "test-vm-bootiso-123",
+				},
+			},
+		},
+	})
+	mockDynamic.AddVM(vm)
+
+	client := NewClientWithClients(fake.NewSimpleClientset(), mockDynamic, 30*time.Second, nil)
+
+	state, err := client.CheckInsertedMedia("test-ns", "test-vm", "cdrom0", "http://example.com/different.iso")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if state != MediaStateConflict {
+		t.Errorf("expected MediaStateConflict, got %d", state)
+	}
+}
+
+func TestCheckInsertedMedia_PVCButNoAnnotation(t *testing.T) {
+	mockDynamic := NewMockDynamicClient()
+	vm := newTestVM("test-ns", "test-vm", nil, nil)
+	vm.Spec.Template.Spec.Volumes = append(vm.Spec.Template.Spec.Volumes, kubevirtv1.Volume{
+		Name: "cdrom0",
+		VolumeSource: kubevirtv1.VolumeSource{
+			PersistentVolumeClaim: &kubevirtv1.PersistentVolumeClaimVolumeSource{
+				PersistentVolumeClaimVolumeSource: corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: "test-vm-bootiso-123",
+				},
+			},
+		},
+	})
+	mockDynamic.AddVM(vm)
+
+	client := NewClientWithClients(fake.NewSimpleClientset(), mockDynamic, 30*time.Second, nil)
+
+	// No annotation means storedURL="" which differs from the requested URL → conflict
+	state, err := client.CheckInsertedMedia("test-ns", "test-vm", "cdrom0", "http://example.com/test.iso")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if state != MediaStateConflict {
+		t.Errorf("expected MediaStateConflict, got %d", state)
+	}
+}
+
+func TestInsertVirtualMedia_StoresURLAnnotation(t *testing.T) {
+	client, mockDynamic, _ := setupInsertVirtualMediaTestBlock(t, false)
+
+	err := client.InsertVirtualMedia("test-ns", "test-vm", "cdrom0", "http://example.com/test.iso")
+	if err != nil {
+		t.Fatalf("InsertVirtualMedia failed: %v", err)
+	}
+
+	vm, err := mockDynamic.GetVM("test-ns", "test-vm")
+	if err != nil {
+		t.Fatalf("Failed to get VM: %v", err)
+	}
+
+	annotationKey := VirtualMediaURLAnnotationPrefix + "cdrom0"
+	storedURL := vm.GetAnnotations()[annotationKey]
+	if storedURL != "http://example.com/test.iso" {
+		t.Errorf("expected annotation %q = %q, got %q", annotationKey, "http://example.com/test.iso", storedURL)
+	}
+}
+
+func TestEjectVirtualMedia_ClearsURLAnnotation(t *testing.T) {
+	mockDynamic := NewMockDynamicClient()
+	vm := newTestVM("test-ns", "test-vm", nil, map[string]string{
+		VirtualMediaURLAnnotationPrefix + "cdrom0": "http://example.com/test.iso",
+	})
+	vm.Spec.Template.Spec.Domain.Devices.Disks = append(vm.Spec.Template.Spec.Domain.Devices.Disks, kubevirtv1.Disk{
+		Name: "cdrom0",
+		DiskDevice: kubevirtv1.DiskDevice{
+			CDRom: &kubevirtv1.CDRomTarget{Bus: kubevirtv1.DiskBusSATA},
+		},
+	})
+	vm.Spec.Template.Spec.Volumes = append(vm.Spec.Template.Spec.Volumes, kubevirtv1.Volume{
+		Name: "cdrom0",
+		VolumeSource: kubevirtv1.VolumeSource{
+			PersistentVolumeClaim: &kubevirtv1.PersistentVolumeClaimVolumeSource{
+				PersistentVolumeClaimVolumeSource: corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: "test-vm-bootiso-123",
+				},
+			},
+		},
+	})
+	mockDynamic.AddVM(vm)
+
+	fakeK8s := fake.NewSimpleClientset()
+	client := NewClientWithClients(fakeK8s, mockDynamic, 30*time.Second, nil)
+
+	err := client.EjectVirtualMedia("test-ns", "test-vm", "cdrom0")
+	if err != nil {
+		t.Fatalf("EjectVirtualMedia failed: %v", err)
+	}
+
+	updated, err := mockDynamic.GetVM("test-ns", "test-vm")
+	if err != nil {
+		t.Fatalf("Failed to get VM: %v", err)
+	}
+
+	annotationKey := VirtualMediaURLAnnotationPrefix + "cdrom0"
+	if url, found := updated.GetAnnotations()[annotationKey]; found {
+		t.Errorf("expected annotation %q to be removed, but found %q", annotationKey, url)
+	}
+}
+
+func TestHandleImportPodCompleted_StalePodSkipsLabelRemoval(t *testing.T) {
+	mockDynamic := NewMockDynamicClient()
+
+	stalePod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "copy-iso-old-pod",
+			Namespace: "test-ns",
+			Labels: map[string]string{
+				ImportPodVMLabel:     "test-vm",
+				ImportPodVolumeLabel: "cdrom0",
+			},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodSucceeded},
+	}
+	fakeK8s := fake.NewSimpleClientset(stalePod)
+
+	// The VM's importing label points to a DIFFERENT (newer) pod
+	vm := newTestVM("test-ns", "test-vm", map[string]string{
+		ImportingLabelPrefix + "cdrom0": "copy-iso-new-pod",
+	}, nil)
+	mockDynamic.AddVM(vm)
+
+	client := NewClientWithClients(fakeK8s, mockDynamic, 30*time.Second, nil)
+	client.handleImportPodCompleted(stalePod)
+
+	// The stale pod should still be deleted (cleanup)
+	_, err := fakeK8s.CoreV1().Pods("test-ns").Get(context.Background(), "copy-iso-old-pod", metav1.GetOptions{})
+	if err == nil {
+		t.Error("Stale pod should have been deleted")
+	}
+
+	// But the importing label must still be present (points to the new pod)
+	updated, err := mockDynamic.GetVM("test-ns", "test-vm")
+	if err != nil {
+		t.Fatalf("Failed to get VM: %v", err)
+	}
+	labelVal := updated.GetLabels()[ImportingLabelPrefix+"cdrom0"]
+	if labelVal != "copy-iso-new-pod" {
+		t.Errorf("expected importing label to still be %q, got %q", "copy-iso-new-pod", labelVal)
+	}
+}
+
+func TestEjectVirtualMedia_KillsHelperPodAndClearsLabel(t *testing.T) {
+	mockDynamic := NewMockDynamicClient()
+
+	helperPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "copy-iso-active-pod",
+			Namespace: "test-ns",
+			Labels: map[string]string{
+				ImportPodVMLabel:     "test-vm",
+				ImportPodVolumeLabel: "cdrom0",
+			},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	fakeK8s := fake.NewSimpleClientset(helperPod)
+
+	vm := newTestVM("test-ns", "test-vm",
+		map[string]string{ImportingLabelPrefix + "cdrom0": "copy-iso-active-pod"},
+		map[string]string{VirtualMediaURLAnnotationPrefix + "cdrom0": "http://example.com/test.iso"},
+	)
+	vm.Spec.Template.Spec.Domain.Devices.Disks = append(vm.Spec.Template.Spec.Domain.Devices.Disks, kubevirtv1.Disk{
+		Name: "cdrom0",
+		DiskDevice: kubevirtv1.DiskDevice{
+			CDRom: &kubevirtv1.CDRomTarget{Bus: kubevirtv1.DiskBusSATA},
+		},
+	})
+	vm.Spec.Template.Spec.Volumes = append(vm.Spec.Template.Spec.Volumes, kubevirtv1.Volume{
+		Name: "cdrom0",
+		VolumeSource: kubevirtv1.VolumeSource{
+			PersistentVolumeClaim: &kubevirtv1.PersistentVolumeClaimVolumeSource{
+				PersistentVolumeClaimVolumeSource: corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: "test-vm-bootiso-123",
+				},
+			},
+		},
+	})
+	mockDynamic.AddVM(vm)
+
+	client := NewClientWithClients(fakeK8s, mockDynamic, 30*time.Second, nil)
+
+	err := client.EjectVirtualMedia("test-ns", "test-vm", "cdrom0")
+	if err != nil {
+		t.Fatalf("EjectVirtualMedia failed: %v", err)
+	}
+
+	// The helper pod should be deleted
+	_, err = fakeK8s.CoreV1().Pods("test-ns").Get(context.Background(), "copy-iso-active-pod", metav1.GetOptions{})
+	if err == nil {
+		t.Error("Running helper pod should have been killed during eject")
+	}
+
+	// The importing label should be removed
+	updated, err := mockDynamic.GetVM("test-ns", "test-vm")
+	if err != nil {
+		t.Fatalf("Failed to get VM: %v", err)
+	}
+	if val, found := updated.GetLabels()[ImportingLabelPrefix+"cdrom0"]; found {
+		t.Errorf("importing label should have been removed, but found %q", val)
+	}
+
+	// The URL annotation should also be removed
+	if url, found := updated.GetAnnotations()[VirtualMediaURLAnnotationPrefix+"cdrom0"]; found {
+		t.Errorf("URL annotation should have been removed, but found %q", url)
 	}
 }
