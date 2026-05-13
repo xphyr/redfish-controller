@@ -59,12 +59,12 @@ import (
 
 	"sync"
 
-	"github.com/v1k0d3n/kubevirt-redfish/pkg/auth"
-	"github.com/v1k0d3n/kubevirt-redfish/pkg/config"
-	"github.com/v1k0d3n/kubevirt-redfish/pkg/errors"
-	"github.com/v1k0d3n/kubevirt-redfish/pkg/kubevirt"
-	"github.com/v1k0d3n/kubevirt-redfish/pkg/logger"
-	"github.com/v1k0d3n/kubevirt-redfish/pkg/redfish"
+	"github.com/kubevirt/redfish-controller/pkg/auth"
+	"github.com/kubevirt/redfish-controller/pkg/config"
+	"github.com/kubevirt/redfish-controller/pkg/errors"
+	"github.com/kubevirt/redfish-controller/pkg/kubevirt"
+	"github.com/kubevirt/redfish-controller/pkg/logger"
+	"github.com/kubevirt/redfish-controller/pkg/redfish"
 )
 
 // Server represents the HTTP server for the KubeVirt Redfish API.

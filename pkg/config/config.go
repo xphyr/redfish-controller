@@ -59,10 +59,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kubevirt/redfish-controller/pkg/errors"
+	"github.com/kubevirt/redfish-controller/pkg/kubevirt"
+	"github.com/kubevirt/redfish-controller/pkg/logger"
 	"github.com/spf13/viper"
-	"github.com/v1k0d3n/kubevirt-redfish/pkg/errors"
-	"github.com/v1k0d3n/kubevirt-redfish/pkg/kubevirt"
-	"github.com/v1k0d3n/kubevirt-redfish/pkg/logger"
 )
 
 // Config represents the complete application configuration structure.

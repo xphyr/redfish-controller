@@ -51,8 +51,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/v1k0d3n/kubevirt-redfish/pkg/config"
-	"github.com/v1k0d3n/kubevirt-redfish/pkg/logger"
+	"github.com/kubevirt/redfish-controller/pkg/config"
+	"github.com/kubevirt/redfish-controller/pkg/logger"
 )
 
 // User represents an authenticated user with access permissions.

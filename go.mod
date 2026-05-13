@@ -1,4 +1,4 @@
-module github.com/v1k0d3n/kubevirt-redfish
+module github.com/kubevirt/redfish-controller
 
 go 1.24.0
 

@@ -22,7 +22,7 @@ package server
 import (
 	"time"
 
-	"github.com/v1k0d3n/kubevirt-redfish/pkg/redfish"
+	"github.com/kubevirt/redfish-controller/pkg/redfish"
 )
 
 // TaskInfo represents an individual task with its current state and metadata.

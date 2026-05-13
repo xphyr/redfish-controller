@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/v1k0d3n/kubevirt-redfish/pkg/logger"
+	"github.com/kubevirt/redfish-controller/pkg/logger"
 )
 
 func TestNewCache(t *testing.T) {

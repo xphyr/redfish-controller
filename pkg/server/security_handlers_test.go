@@ -9,8 +9,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/v1k0d3n/kubevirt-redfish/pkg/auth"
-	"github.com/v1k0d3n/kubevirt-redfish/pkg/config"
+	"github.com/kubevirt/redfish-controller/pkg/auth"
+	"github.com/kubevirt/redfish-controller/pkg/config"
 )
 
 // Test helper function to create a test config
