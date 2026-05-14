@@ -22,16 +22,16 @@ This Helm chart deploys the KubeVirt Redfish API server, which provides a Redfis
 
 ```bash
 # Show available values
-helm show values oci://quay.io/bjozsa-redhat/charts/kubevirt-redfish --version 0.2.1
+helm show values oci://quay.io/kubevirt/charts/redfish-controller --version 0.2.1
 
 # Install with default values
-helm install kubevirt-redfish oci://quay.io/bjozsa-redhat/charts/kubevirt-redfish \
+helm install kubevirt-redfish oci://quay.io/kubevirt/charts/redfish-controller \
   --version 0.2.1 \
   --namespace kubevirt-redfish \
   --create-namespace
 
 # Install with custom values
-helm install kubevirt-redfish oci://quay.io/bjozsa-redhat/charts/kubevirt-redfish \
+helm install kubevirt-redfish oci://quay.io/kubevirt/charts/redfish-controller \
   --version 0.2.1 \
   --namespace kubevirt-redfish \
   --create-namespace \
@@ -420,7 +420,7 @@ kubectl logs deployment/kubevirt-redfish -n your-namespace | grep -E "(virtual m
 
 ```bash
 # Upgrade with OCI registry
-helm upgrade kubevirt-redfish oci://quay.io/bjozsa-redhat/charts/kubevirt-redfish \
+helm upgrade kubevirt-redfish oci://quay.io/kubevirt/charts/redfish-controller \
   --version 0.2.1 \
   --namespace kubevirt-redfish
 
@@ -445,6 +445,6 @@ helm upgrade kubevirt-redfish ./helm \
 
 ### Getting Help
 
-- **GitHub Issues**: [Create an issue](https://github.com/v1k0d3n/kubevirt-redfish/issues)
-- **Documentation**: Check the [main README](https://github.com/v1k0d3n/kubevirt-redfish)
+- **GitHub Issues**: [Create an issue](https://github.com/kubevirt/redfish-controller/issues)
+- **Documentation**: Check the [main README](https://github.com/kubevirt/redfish-controller)
 - **Logs**: Use `kubectl logs -f deployment/kubevirt-redfish -n your-namespace` 

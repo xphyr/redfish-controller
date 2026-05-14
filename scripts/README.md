@@ -20,8 +20,8 @@ Builds and pushes a container image to a registry using Buildah.
 
 **Environment Variables:**
 - `REGISTRY`: Container registry (default: `quay.io`)
-- `NAMESPACE`: Registry namespace (default: `bjozsa-redhat`)
-- `IMAGE_NAME`: Image name (default: `kubevirt-redfish`)
+- `NAMESPACE`: Registry namespace (default: `kubevirt`)
+- `IMAGE_NAME`: Image name (default: `redfish-controller`)
 - `QUAY_USERNAME`: Registry username (required)
 - `QUAY_PASSWORD`: Registry password (required)
 
@@ -41,8 +41,8 @@ Tags an existing image with the 'latest' tag.
 
 **Environment Variables:**
 - `REGISTRY`: Container registry (default: `quay.io`)
-- `NAMESPACE`: Registry namespace (default: `bjozsa-redhat`)
-- `IMAGE_NAME`: Image name (default: `kubevirt-redfish`)
+- `NAMESPACE`: Registry namespace (default: `kubevirt`)
+- `IMAGE_NAME`: Image name (default: `redfish-controller`)
 - `QUAY_USERNAME`: Registry username (required)
 - `QUAY_PASSWORD`: Registry password (required)
 

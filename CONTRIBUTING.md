@@ -36,7 +36,7 @@ Before you begin, ensure you have the following installed:
    ```bash
    git clone https://github.com/YOUR_USERNAME/kubevirt-redfish.git
    cd kubevirt-redfish
-   git remote add upstream https://github.com/v1k0d3n/kubevirt-redfish.git
+   git remote add upstream https://github.com/kubevirt/redfish-controller.git
    ```
 
 2. **Quick Setup (Recommended):**
@@ -356,8 +356,8 @@ kubectl get pods -n kubevirt
 
 ### Getting Help
 
-- **GitHub Issues** - [Create an issue](https://github.com/v1k0d3n/kubevirt-redfish/issues)
-- **Discussions** - [GitHub Discussions](https://github.com/v1k0d3n/kubevirt-redfish/discussions)
+- **GitHub Issues** - [Create an issue](https://github.com/kubevirt/redfish-controller/issues)
+- **Discussions** - [GitHub Discussions](https://github.com/kubevirt/redfish-controller/discussions)
 - **Documentation** - Check the [README.md](README.md) and [docs/](docs/) directory
 
 ### Development Tips
