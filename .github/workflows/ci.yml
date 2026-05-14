@@ -247,6 +247,9 @@ jobs:
         name: kubevirt-redfish-binary
         path: kubevirt-redfish
         retention-days: 7
+        
+  # XXX Quay and Helm push temporarily disabled, need to be adapted to KubeVirt
+  # The build itself stays for CI purposes
 
   # Container build and push for commits
   container-build-commit:
@@ -263,12 +266,12 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
       
-    - name: Log in to Quay.io
-      uses: docker/login-action@v3
-      with:
-        registry: ${{ env.REGISTRY }}
-        username: ${{ secrets.QUAY_USERNAME }}
-        password: ${{ secrets.QUAY_PASSWORD }}
+    # - name: Log in to Quay.io
+    #   uses: docker/login-action@v3
+    #   with:
+    #     registry: ${{ env.REGISTRY }}
+    #     username: ${{ secrets.QUAY_USERNAME }}
+    #     password: ${{ secrets.QUAY_PASSWORD }}
         
     - name: Generate tags manually
       id: tags
@@ -297,7 +300,7 @@ jobs:
       with:
         context: .
         file: ./Dockerfile
-        push: true
+        # push: true
         tags: ${{ steps.tags.outputs.tags }}
         platforms: linux/amd64,linux/arm64
         cache-from: type=gha
@@ -306,12 +309,12 @@ jobs:
         sbom: false
         outputs: type=registry
         
-    - name: Debug - Show what was pushed
-      run: |
-        echo "Container images pushed with tags:"
-        echo "${{ steps.tags.outputs.tags }}"
-        echo "Commit SHA: ${{ steps.tags.outputs.commit_sha }}"
-        echo "Registry: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}"
+    # - name: Debug - Show what was pushed
+    #   run: |
+    #     echo "Container images pushed with tags:"
+    #     echo "${{ steps.tags.outputs.tags }}"
+    #     echo "Commit SHA: ${{ steps.tags.outputs.commit_sha }}"
+    #     echo "Registry: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}"
 
   # Container build and push for git tags
   container-build-tag:
@@ -325,12 +328,12 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
       
-    - name: Log in to Quay.io
-      uses: docker/login-action@v3
-      with:
-        registry: ${{ env.REGISTRY }}
-        username: ${{ secrets.QUAY_USERNAME }}
-        password: ${{ secrets.QUAY_PASSWORD }}
+    # - name: Log in to Quay.io
+    #   uses: docker/login-action@v3
+    #   with:
+    #     registry: ${{ env.REGISTRY }}
+    #     username: ${{ secrets.QUAY_USERNAME }}
+    #     password: ${{ secrets.QUAY_PASSWORD }}
         
     - name: Generate tags manually
       id: tags
@@ -350,7 +353,7 @@ jobs:
       with:
         context: .
         file: ./Dockerfile
-        push: true
+        # push: true
         tags: ${{ steps.tags.outputs.tags }}
         platforms: linux/amd64,linux/arm64
         cache-from: type=gha
@@ -371,12 +374,12 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
       
-    - name: Log in to Quay.io
-      uses: docker/login-action@v3
-      with:
-        registry: ${{ env.REGISTRY }}
-        username: ${{ secrets.QUAY_USERNAME }}
-        password: ${{ secrets.QUAY_PASSWORD }}
+    # - name: Log in to Quay.io
+    #   uses: docker/login-action@v3
+    #   with:
+    #     registry: ${{ env.REGISTRY }}
+    #     username: ${{ secrets.QUAY_USERNAME }}
+    #     password: ${{ secrets.QUAY_PASSWORD }}
         
     - name: Tag and push latest
       run: |
@@ -419,10 +422,10 @@ jobs:
       with:
         version: '3.12.0'
         
-    - name: Log in to Helm registry
-      run: |
-        echo "Authenticating with Helm registry..."
-        helm registry login ${{ env.REGISTRY }} -u "${{ secrets.QUAY_USERNAME }}" -p "${{ secrets.QUAY_PASSWORD }}"
+    # - name: Log in to Helm registry
+    #   run: |
+    #     echo "Authenticating with Helm registry..."
+    #     helm registry login ${{ env.REGISTRY }} -u "${{ secrets.QUAY_USERNAME }}" -p "${{ secrets.QUAY_PASSWORD }}"
         
     - name: Build and push Helm chart
       run: |
@@ -434,8 +437,8 @@ jobs:
         echo "Updated Helm chart values to use latest image"
         echo "Debug: HELM_FULL_REPO will be: oci://${{ env.REGISTRY }}/${{ env.NAMESPACE }}/charts"
         echo "Debug: Chart name: kubevirt-redfish-0.0.0-${COMMIT_SHA}.tgz"
-        make build-push-chart VERSION="${COMMIT_SHA}"
-        echo "Helm chart build and push completed successfully"
+        # make build-push-chart VERSION="${COMMIT_SHA}"
+        # echo "Helm chart build and push completed successfully"
       env:
         QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
         QUAY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
@@ -454,10 +457,10 @@ jobs:
       with:
         version: '3.12.0'
         
-    - name: Log in to Helm registry
-      run: |
-        echo "Authenticating with Helm registry..."
-        helm registry login ${{ env.REGISTRY }} -u "${{ secrets.QUAY_USERNAME }}" -p "${{ secrets.QUAY_PASSWORD }}"
+    # - name: Log in to Helm registry
+    #   run: |
+    #     echo "Authenticating with Helm registry..."
+    #     helm registry login ${{ env.REGISTRY }} -u "${{ secrets.QUAY_USERNAME }}" -p "${{ secrets.QUAY_PASSWORD }}"
         
     - name: Build and push Helm chart
       run: |
@@ -468,8 +471,8 @@ jobs:
         sed -i.bak 's|tag: ".*"|tag: "'${TAG_NAME}'"|' helm/values.yaml
         echo "Updated Helm chart values to use ${TAG_NAME} image"
         echo "Helm chart will be tagged as: $(echo ${TAG_NAME} | sed 's/^v//')"
-        make build-push-chart VERSION="${TAG_NAME}"
-        echo "Helm chart build and push completed successfully"
+        # make build-push-chart VERSION="${TAG_NAME}"
+        # echo "Helm chart build and push completed successfully"
       env:
         QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
         QUAY_PASSWORD: ${{ secrets.QUAY_PASSWORD }} 
