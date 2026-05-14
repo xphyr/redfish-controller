@@ -1,8 +1,14 @@
 # KubeVirt Redfish
 
-[![CI/CD](https://github.com/v1k0d3n/kubevirt-redfish/actions/workflows/ci.yml/badge.svg)](https://github.com/v1k0d3n/kubevirt-redfish/actions)
+> [!WARNING]
+> The repository recently moved under Kubevirt and the README has
+> not been fully updated yet. Some of the links might lead to the
+> personal repository of the original maintainer or not existing
+> kubevirt urls.
+
+[![CI/CD](https://github.com/kubevirt/redfish-controller/actions/workflows/ci.yml/badge.svg)](https://github.com/kubevirt/redfish-controller/actions)
 [![Go](https://img.shields.io/badge/go-1.21+-blue.svg)](https://golang.org/dl/)
-[![Coverage](https://codecov.io/gh/v1k0d3n/kubevirt-redfish/branch/main/graph/badge.svg)](https://codecov.io/gh/v1k0d3n/kubevirt-redfish)
+[![Coverage](https://codecov.io/gh/kubevirt/redfish-controller/branch/main/graph/badge.svg)](https://codecov.io/gh/kubevirt/redfish-controller)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Container](https://img.shields.io/badge/container-quay.io-red.svg)](https://quay.io/repository/bjozsa-redhat/kubevirt-redfish)
 [![Helm](https://img.shields.io/badge/helm-oci-blue.svg)](https://quay.io/repository/bjozsa-redhat/charts/kubevirt-redfish)
@@ -59,45 +65,45 @@ KubeVirt Redfish bridges the gap between traditional virtualization management t
 
 ## Installation QuickStart (via Helm)
 
-The `kubevirt-redfish` project uses [Quay.io](https://quay.io/) to store both the [container](https://quay.io/repository/bjozsa-redhat/kubevirt-redfish?tab=tags) and [Helm](https://quay.io/repository/bjozsa-redhat/charts/kubevirt-redfish?tab=tags) chart artifacts. Previous instructions were to written to support a direct OCI installation (i.e. `helm pull oci://quay.io/bjozsa-redhat/charts/kubevirt-redfish --version 0.2.1`), however I would suggest you follow the instructions below to install `kubevirt-redfish`. Reserve any direct OCI chart testing for development purposes only. There is also an [operator](https://github.com/v1k0d3n/kubevirt-redfish-operator) that can be leveraged as well, but please wait until release v0.3.0 for these projects to work seamlessly. For now, follow the instructions below for the most recent installation proceedures.
+The `kubevirt-redfish` project uses [Quay.io](https://quay.io/) to store both the [container](https://quay.io/repository/kubevirt/redfish-controller?tab=tags) and [Helm](https://quay.io/repository/kubevirt/charts/kubevirt-redfish?tab=tags) chart artifacts. Previous instructions were to written to support a direct OCI installation (i.e. `helm pull oci://quay.io/bjozsa-redhat/charts/kubevirt-redfish --version 0.2.1`), however I would suggest you follow the instructions below to install `kubevirt-redfish`. Reserve any direct OCI chart testing for development purposes only. There is also an [operator](https://github.com/kubevirt/redfish-controller-operator) that can be leveraged as well, but please wait until release v0.3.0 for these projects to work seamlessly. For now, follow the instructions below for the most recent installation proceedures.
 
 (*Updated: 25/08/25 at 11:35UTC)
 
 1. Add the Helm repository for the most recent Chart for this project (`kubevirt-redfish`).
 
    ```bash
-   helm repo add v1k0d3n https://v1k0d3n.github.io/charts
+   helm repo add kubevirt https://kubevirt.github.io/charts
    helm repo update
    ```
 
    You should then see the Helm chart when performing a `helm list`.
 
    ```bash
-   ❯ helm search repo v1k0d3n
+   ❯ helm search repo kubevirt
    NAME                         CHART VERSION   APP VERSION     DESCRIPTION
-   v1k0d3n/kubevirt-redfish     0.2.3           v0.2.3-f87ff92  Custom kubevirt-redfish chart with enhanced fea...
-   v1k0d3n/vms-on-ocpv          0.1.1           v0.1.1-ff18cb3  A Helm chart that deploys Virtual Machines on O...
+   kubevirt/redfish-controller     0.2.3           v0.2.3-f87ff92  Custom kubevirt-redfish chart with enhanced fea...
+   kubevirt/vms-on-ocpv          0.1.1           v0.1.1-ff18cb3  A Helm chart that deploys Virtual Machines on O...
    ```
 
 2. You can then review the example `values.yaml` included with the Helm chart by using the following command.
    ```bash
-   helm show values v1k0d3n/kubevirt-redfish --version 0.2.3
+   helm show values kubevirt/redfish-controller --version 0.2.3
    ```
 
    NOTE: If you prefer to have a cleaned version of the `values.yaml` (i.e. without comments or line breaks) you can run the following.
    ```bash
-   helm show values v1k0d3n/kubevirt-redfish --version 0.2.3 | sed 's/\s*#.*$//' | grep -v '^\s*$'
+   helm show values kubevirt/redfish-controller --version 0.2.3 | sed 's/\s*#.*$//' | grep -v '^\s*$'
    ```
 
 3. To save the `values.yaml` to your your local environment for direct editing, just redirect the output to a YAML file.
    ```bash
-   helm show values v1k0d3n/kubevirt-redfish --version 0.2.3 > my-values.yaml
+   helm show values kubevirt/redfish-controller --version 0.2.3 > my-values.yaml
    ```
 
 4. You can also save the chart locally by issuing the following command.
    ```bash
    # Download the Chart locally:
-   helm pull v1k0d3n/kubevirt-redfish --version 0.2.3
+   helm pull kubevirt/redfish-controller --version 0.2.3
    
    # Explode the tar file:
    tar -xzf kubevirt-redfish-0.2.3.tgz
@@ -108,7 +114,7 @@ The `kubevirt-redfish` project uses [Quay.io](https://quay.io/) to store both th
 
 5. Now you can install the Chart using your own custom values.yaml:
    ```bash
-   helm install kubevirt-redfish v1k0d3n/kubevirt-redfish --version 0.2.3 \
+   helm install kubevirt-redfish kubevirt/redfish-controller --version 0.2.3 \
      --namespace kubevirt-redfish \
      --create-namespace \
      -f my-values.yaml
@@ -116,7 +122,7 @@ The `kubevirt-redfish` project uses [Quay.io](https://quay.io/) to store both th
 
 6. You can also ***optionally*** use inline edits during the `helm install` command.
    ```bash
-   helm install kubevirt-redfish v1k0d3n/kubevirt-redfish \
+   helm install kubevirt-redfish kubevirt/redfish-controller \
      --set image.tag=v0.2.3 \
      --set service.type=LoadBalancer \
      --namespace kubevirt-redfish \
