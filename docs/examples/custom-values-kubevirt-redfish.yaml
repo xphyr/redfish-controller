@@ -4,7 +4,7 @@
 global:
   image:
     pullPolicy: Always
-    repository: quay.io/bjozsa-redhat/kubevirt-redfish
+    repository: quay.io/kubevirt/redfish-controller
     tag: v0.2.3
   # THIS NAMESPACE YOU WILL NEED TO CHANGE FOR YOUR ENVIRONMENT: BUT NOT FOR THE DEMONSTRATION!
   namespace: jinkit-kvm

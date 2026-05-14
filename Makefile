@@ -1,7 +1,7 @@
 # Variables
 IMAGE_REGISTRY ?= quay.io
-IMAGE_NAMESPACE ?= bjozsa-redhat
-IMAGE_NAME ?= kubevirt-redfish
+IMAGE_NAMESPACE ?= kubevirt
+IMAGE_NAME ?= redfish-controller
 IMAGE_TAG ?= latest
 FULL_IMAGE_NAME = $(IMAGE_REGISTRY)/$(IMAGE_NAMESPACE)/$(IMAGE_NAME):$(IMAGE_TAG)
 

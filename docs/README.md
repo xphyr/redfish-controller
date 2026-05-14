@@ -82,7 +82,7 @@ This guide is intended to provide an end-to-end demonstration of an OpenShift `C
 1. Again using the `v1k0d3n` Helm repository, you can deploy the `kubevirt-redfish` using the Helm chart called `v1k0d3n/kubevirt-redfish`. I ***am not** going to recommend downloading a custom `values.yaml` in this case, but instead I recommend you edit/use the [sample values file](./examples/custom-values-kubevirt-redfish.yaml).
 
    ```bash
-   curl -L -o custom-values-kubevirt-redfish.yaml https://raw.githubusercontent.com/v1k0d3n/kubevirt-redfish/refs/heads/main/docs/examples/custom-values-kubevirt-redfish.yaml
+   curl -L -o custom-values-kubevirt-redfish.yaml https://raw.githubusercontent.com/kubevirt/redfish-controller/refs/heads/main/docs/examples/custom-values-kubevirt-redfish.yaml
    ```
 
    **EXTREMELY IMPORTANT:** *This is a demonstration, so assuming that you're keeping the same namespace names (and all the other settings), than the only field you should have to edit is the `route.host` field (which is configured to be: `kubevirt-redfish-jinkit-kvm.apps.hub.lab.ocp.run`). You can change the `<clustername>.<domainname>` but if you've left all the other settings (as I recommended), then you can leave the other parts of the URL (i.e. `kubevirt-redfish-jinkit-kvm.apps.`).
@@ -109,7 +109,7 @@ This guide is intended to provide an end-to-end demonstration of an OpenShift `C
 3. Now apply the example `BareMetalHost` Redfish secrets (username/password) from the [examples folder](./exmaples/).
 
    ```bash
-   curl -L -o bmc-ztp-jinkit-kvm.yaml https://raw.githubusercontent.com/v1k0d3n/kubevirt-redfish/refs/heads/main/docs/examples/bmc-ztp-jinkit-kvm.yaml
+   curl -L -o bmc-ztp-jinkit-kvm.yaml https://raw.githubusercontent.com/kubevirt/redfish-controller/refs/heads/main/docs/examples/bmc-ztp-jinkit-kvm.yaml
    
    oc apply -f bmc-ztp-jinkit-kvm.yaml
    ```
@@ -117,7 +117,7 @@ This guide is intended to provide an end-to-end demonstration of an OpenShift `C
 4. Apply the **4.20** `ClusterImageSet` from the [examples folder](./exmaples/).
 
    ```bash
-   curl -L -o cis-prerelease-420.yaml https://raw.githubusercontent.com/v1k0d3n/kubevirt-redfish/refs/heads/main/docs/examples/cis-prerelease-420.yaml
+   curl -L -o cis-prerelease-420.yaml https://raw.githubusercontent.com/kubevirt/redfish-controller/refs/heads/main/docs/examples/cis-prerelease-420.yaml
    
    oc apply -f cis-prerelease-420.yaml
    ```
@@ -125,7 +125,7 @@ This guide is intended to provide an end-to-end demonstration of an OpenShift `C
 5. **EXTREMELY IMPORTANT:** For this next step, you will have roughly 26 edits that need to be made. It's the `ClusterInstance` deployment, which is our final manifest. Let's download it first, and then I will tell you what fields need changed.
 
    ```bash
-   curl -L -o ci-ztp-jinkit-kvm.yaml https://raw.githubusercontent.com/v1k0d3n/kubevirt-redfish/refs/heads/main/docs/examples/ci-ztp-jinkit-kvm.yaml
+   curl -L -o ci-ztp-jinkit-kvm.yaml https://raw.githubusercontent.com/kubevirt/redfish-controller/refs/heads/main/docs/examples/ci-ztp-jinkit-kvm.yaml
    ```
 
    After downloading the `ci-ztp-jinkit-kvm.yaml` manifest, you will need to search for the string `changeme` scattered throughout the YAML file. There are 26 occurances, but they are all fairly standard fields. Please review my full example called [`ci-ztp-jinkit-kvm.yaml`](./examples/ci-ztp-jinkit-kvm-example.yaml) if you need some helpful hints.

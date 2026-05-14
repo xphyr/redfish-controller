@@ -6,8 +6,8 @@ set -e
 #
 # Environment variables:
 #   REGISTRY: Container registry (default: quay.io)
-#   NAMESPACE: Registry namespace (default: bjozsa-redhat)
-#   IMAGE_NAME: Image name (default: kubevirt-redfish)
+#   NAMESPACE: Registry namespace (default: kubevirt)
+#   IMAGE_NAME: Image name (default: redfish-controller)
 #   QUAY_USERNAME: Registry username
 #   QUAY_PASSWORD: Registry password
 
@@ -17,8 +17,8 @@ if [ $# -eq 0 ]; then
     echo ""
     echo "Environment variables:"
     echo "  REGISTRY: Container registry (default: quay.io)"
-    echo "  NAMESPACE: Registry namespace (default: bjozsa-redhat)"
-    echo "  IMAGE_NAME: Image name (default: kubevirt-redfish)"
+    echo "  NAMESPACE: Registry namespace (default: kubevirt)"
+    echo "  IMAGE_NAME: Image name (default: redfish-controller)"
     echo "  QUAY_USERNAME: Registry username"
     echo "  QUAY_PASSWORD: Registry password"
     exit 1
@@ -26,8 +26,8 @@ fi
 
 TAG=$1
 REGISTRY="${REGISTRY:-quay.io}"
-NAMESPACE="${NAMESPACE:-bjozsa-redhat}"
-IMAGE_NAME="${IMAGE_NAME:-kubevirt-redfish}"
+NAMESPACE="${NAMESPACE:-kubevirt}"
+IMAGE_NAME="${IMAGE_NAME:-redfish-controller}"
 FULL_IMAGE_NAME="${REGISTRY}/${NAMESPACE}/${IMAGE_NAME}:${TAG}"
 
 echo "Building container image for tag: ${TAG}"

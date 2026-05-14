@@ -9,9 +9,9 @@ keywords:
   - redfish
   - virtualization
   - api
-home: https://github.com/kubevirt/kubevirt-redfish
+home: https://github.com/kubevirt/redfish-controller
 sources:
-  - https://github.com/kubevirt/kubevirt-redfish
+  - https://github.com/kubevirt/redfish-controller
 maintainers:
   - name: Brandon B. Jozsa
     email: bjozsa@redhat.com

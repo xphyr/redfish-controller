@@ -7,11 +7,11 @@
 > kubevirt urls.
 
 [![CI/CD](https://github.com/kubevirt/redfish-controller/actions/workflows/ci.yml/badge.svg)](https://github.com/kubevirt/redfish-controller/actions)
-[![Go](https://img.shields.io/badge/go-1.21+-blue.svg)](https://golang.org/dl/)
+[![Go](https://img.shields.io/badge/go-1.24+-blue.svg)](https://golang.org/dl/)
 [![Coverage](https://codecov.io/gh/kubevirt/redfish-controller/branch/main/graph/badge.svg)](https://codecov.io/gh/kubevirt/redfish-controller)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Container](https://img.shields.io/badge/container-quay.io-red.svg)](https://quay.io/repository/bjozsa-redhat/kubevirt-redfish)
-[![Helm](https://img.shields.io/badge/helm-oci-blue.svg)](https://quay.io/repository/bjozsa-redhat/charts/kubevirt-redfish)
+[![Container](https://img.shields.io/badge/container-quay.io-red.svg)](https://quay.io/repository/kubevirt/redfish-controller)
+[![Helm](https://img.shields.io/badge/helm-oci-blue.svg)](https://quay.io/repository/kubevirt/charts/redfish-controller)
 [![Platform](https://img.shields.io/badge/platform-OpenShift-red.svg)](https://docs.openshift.com/container-platform/latest/virt/about-virt.html)
 
 A Redfish-compatible API server for KubeVirt/OpenShift Virtualization that enables out-of-band management of virtual machines through standard Redfish protocols.
@@ -65,7 +65,7 @@ KubeVirt Redfish bridges the gap between traditional virtualization management t
 
 ## Installation QuickStart (via Helm)
 
-The `kubevirt-redfish` project uses [Quay.io](https://quay.io/) to store both the [container](https://quay.io/repository/kubevirt/redfish-controller?tab=tags) and [Helm](https://quay.io/repository/kubevirt/charts/kubevirt-redfish?tab=tags) chart artifacts. Previous instructions were to written to support a direct OCI installation (i.e. `helm pull oci://quay.io/bjozsa-redhat/charts/kubevirt-redfish --version 0.2.1`), however I would suggest you follow the instructions below to install `kubevirt-redfish`. Reserve any direct OCI chart testing for development purposes only. There is also an [operator](https://github.com/kubevirt/redfish-controller-operator) that can be leveraged as well, but please wait until release v0.3.0 for these projects to work seamlessly. For now, follow the instructions below for the most recent installation proceedures.
+The `kubevirt-redfish` project uses [Quay.io](https://quay.io/) to store both the [container](https://quay.io/repository/kubevirt/redfish-controller?tab=tags) and [Helm](https://quay.io/repository/kubevirt/charts/kubevirt-redfish?tab=tags) chart artifacts. Previous instructions were to written to support a direct OCI installation (i.e. `helm pull oci://quay.io/kubevirt/charts/redfish-controller --version 0.2.1`), however I would suggest you follow the instructions below to install `kubevirt-redfish`. Reserve any direct OCI chart testing for development purposes only. There is also an [operator](https://github.com/kubevirt/redfish-controller-operator) that can be leveraged as well, but please wait until release v0.3.0 for these projects to work seamlessly. For now, follow the instructions below for the most recent installation proceedures.
 
 (*Updated: 25/08/25 at 11:35UTC)
 
