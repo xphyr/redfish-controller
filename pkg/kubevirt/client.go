@@ -37,9 +37,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/v1k0d3n/kubevirt-redfish/pkg/logger"
+	"github.com/kubevirt/redfish-controller/pkg/logger"
 
-	"github.com/v1k0d3n/kubevirt-redfish/pkg/errors"
+	"github.com/kubevirt/redfish-controller/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

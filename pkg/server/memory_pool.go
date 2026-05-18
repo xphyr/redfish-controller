@@ -26,7 +26,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/v1k0d3n/kubevirt-redfish/pkg/logger"
+	"github.com/kubevirt/redfish-controller/pkg/logger"
 )
 
 // BufferPool manages reusable byte buffers to reduce memory allocations

@@ -24,7 +24,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/v1k0d3n/kubevirt-redfish/pkg/errors"
+	"github.com/kubevirt/redfish-controller/pkg/errors"
 )
 
 func TestLoadConfig(t *testing.T) {

@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/v1k0d3n/kubevirt-redfish/pkg/config"
-	"github.com/v1k0d3n/kubevirt-redfish/pkg/kubevirt"
-	"github.com/v1k0d3n/kubevirt-redfish/pkg/logger"
-	"github.com/v1k0d3n/kubevirt-redfish/pkg/server"
+	"github.com/kubevirt/redfish-controller/pkg/config"
+	"github.com/kubevirt/redfish-controller/pkg/kubevirt"
+	"github.com/kubevirt/redfish-controller/pkg/logger"
+	"github.com/kubevirt/redfish-controller/pkg/server"
 )
 
 func TestMainVersionFlag(t *testing.T) {
